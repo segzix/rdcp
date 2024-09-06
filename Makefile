@@ -1,17 +1,25 @@
 CFLAGS += -Wall
 LDFLAGS += -libverbs -lrdmacm -lpthread
 XSLTPROC = /usr/bin/xsltproc
+CC = /usr/bin/gcc
 
-all: rdcp rdcp.8
+all: rdcp rdcp.8 rdcp.man
 default: all
 
-.PHONY: rdcp.8
+#生成ngroff格式文件
 rdcp.8: rdcp.8.xml
-	-test -z "$(XSLTPROC)" || $(XSLTPROC) -o $@ http://docbook.sourceforge.net/release/xsl/current/manpages/docbook.xsl $<
+	$(XSLTPROC) -o $@ /root/RDCP/xsl/manpages/docbook.xsl $<
+
+#生成rdcp使用手册
+rdcp.man:
+	nroff -man rdcp.8 | sed 's/.\{0,1\}//g' > rdcp.man 
 
 .PHONY: clean
 clean:
 	rm -f rdcp
 	rm -f rdcp.8
+	rm -f rdcp.man
 
-rdcp:
+#生成rdcp程序
+rdcp: rdcp.c
+	$(CC) $(CFLAGS) -o rdcp rdcp.c $(LDFLAGS)

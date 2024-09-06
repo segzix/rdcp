@@ -1,0 +1,21 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+ <head>
+  <title>Index of /release/xsl/current/epub3</title>
+ </head>
+ <body>
+<h1>Index of /release/xsl/current/epub3</h1>
+<pre><img src="/icons/blank.gif" alt="Icon "> <a href="?C=N;O=A">Name</a>                    <a href="?C=M;O=D">Last modified</a>      <a href="?C=S;O=A">Size</a>  <a href="?C=D;O=A">Description</a><hr><img src="/icons/back.gif" alt="[PARENTDIR]"> <a href="/release/xsl/current/">Parent Directory</a>                             -   
+<img src="/icons/text.gif" alt="[   ]"> <a href="chunk.xsl">chunk.xsl</a>               2013-09-04 17:39  1.0K  
+<img src="/icons/text.gif" alt="[   ]"> <a href="chunkfast.xsl">chunkfast.xsl</a>           2013-09-04 17:39  2.8K  
+<img src="/icons/text.gif" alt="[TXT]"> <a href="docbook-epub.css.xml">docbook-epub.css.xml</a>    2013-09-04 17:39  2.0K  
+<img src="/icons/text.gif" alt="[   ]"> <a href="docbook.xsl">docbook.xsl</a>             2013-09-04 17:39  507   
+<img src="/icons/text.gif" alt="[   ]"> <a href="epub3-chunk-mods.xsl">epub3-chunk-mods.xsl</a>    2013-09-04 17:39  2.0K  
+<img src="/icons/text.gif" alt="[   ]"> <a href="profile-chunk.xsl">profile-chunk.xsl</a>       2013-09-04 17:39  2.5K  
+<img src="/icons/text.gif" alt="[   ]"> <a href="profile-docbook.xsl">profile-docbook.xsl</a>     2013-09-04 17:39   17K  
+<img src="/icons/text.gif" alt="[TXT]"> <a href="titlepage.templates.xml">titlepage.templates.xml</a> 2013-09-04 17:39   16K  
+<img src="/icons/text.gif" alt="[TXT]"> <a href="build.xml">build.xml</a>               2014-08-15 19:00  758   
+<img src="/icons/text.gif" alt="[   ]"> <a href="titlepage.templates.xsl">titlepage.templates.xsl</a> 2014-09-06 16:11  173K  
+<img src="/icons/text.gif" alt="[   ]"> <a href="epub3-element-mods.xsl">epub3-element-mods.xsl</a>  2015-08-01 22:00   94K  
+<hr></pre>
+</body></html>

@@ -8,7 +8,7 @@ default: all
 
 #生成ngroff格式文件
 rdcp.8: rdcp.8.xml
-	$(XSLTPROC) -o $@ /root/RDCP/xsl/manpages/docbook.xsl $<
+	$(XSLTPROC) -o $@ ./xsl/manpages/docbook.xsl $<
 
 #生成rdcp使用手册
 rdcp.man:

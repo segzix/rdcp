@@ -705,6 +705,7 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 			goto error;
 		}
 		start_buf = cb->start_buf;
+		memset(cb->start_buf, 0, BUF_SIZE * MAX_TASKS);
 		printf(	"cb->pd->handle: %u\ncb->start_buf: %x\n",
 						cb->pd->handle,cb->start_buf);
 

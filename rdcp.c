@@ -638,14 +638,15 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 
 	VERBOSE_LOG(3, "rdcp_setup_buffers called on cb %p\n", cb);
 
+	// TODO: server use rdma_buf and not start_buf but still use send_tasks
+	// TODO: client use start_buf and not rdma_buf
 	// TODO: handle error
 	for (i = 0; i < MAX_TASKS; i++) {
 	    struct rdcp_task *recv_task = &cb->recv_tasks[i];
 	    struct rdcp_task *send_task = &cb->send_tasks[i];
 
 	    recv_task->buf.id = i;
-	    send_task->buf.id = i;
-
+		//注册recv_task缓冲区的内存
 	    recv_task->mr = ibv_reg_mr(cb->pd,
 					    &recv_task->buf,
 					    sizeof(struct rdma_info),
@@ -655,13 +656,26 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 		    ret = errno;
 		    goto error;
 	    }
+		/*
+		 * 初始化接收缓冲区的元数据(指向缓冲区)
+		 * 1.地址 2.长度 3.描述内存区域的标志key
+		 */
 	    recv_task->sgl.addr = uint64_from_ptr(&recv_task->buf);
 	    recv_task->sgl.length = sizeof(struct rdma_info);
 	    recv_task->sgl.lkey = recv_task->mr->lkey;
+		/*
+		 * 初始化接收队列的接收请求(指向缓冲区的元数据)
+		 * 1.请求缓冲区的第一个元数据结构体 
+		 * 2.总共的缓冲区个数(可能会从链表出发有多个缓冲区)
+		 * 3.请求的id号
+		 */
 	    recv_task->rq_wr.sg_list = &recv_task->sgl;
 	    recv_task->rq_wr.num_sge = 1;
 	    recv_task->rq_wr.wr_id = i;
+		send_task->buf.id = i;
 
+
+		//注册send_task缓冲区的内存
 	    send_task->mr = ibv_reg_mr(cb->pd,
 					    &send_task->buf,
 					    sizeof(struct rdma_info),
@@ -673,6 +687,7 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 	    }
 	}
 
+	//valloc申请内存，刷0，rdma注册内存区域进行保护
 	cb->rdma_buf = valloc(BUF_SIZE * MAX_TASKS);
 	if (!cb->rdma_buf) {
 		fprintf(stderr, "rdma_buf alloc failed\n");
@@ -680,7 +695,6 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 		goto error;
 	}
 	memset(cb->rdma_buf, 0, BUF_SIZE * MAX_TASKS);
-
 	printf(	"cb->pd->handle: %u\ncb->rdma_buf: %x\n",
 						cb->pd->handle,cb->rdma_buf);
 	cb->rdma_mr = ibv_reg_mr(cb->pd, cb->rdma_buf, BUF_SIZE * MAX_TASKS,
@@ -693,11 +707,10 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 		goto error;
 	}
 
-	// TODO: server use rdma_buf and not start_buf but still use send_tasks
-	// TODO: client use start_buf and not rdma_buf
-
 	if (!cb->server) {
 		char* start_buf;
+
+		//valloc申请内存，刷0，rdma注册内存区域进行保护
 		cb->start_buf = valloc(BUF_SIZE * MAX_TASKS);
 		if (!cb->start_buf) {
 			fprintf(stderr, "start_buf malloc failed\n");
@@ -708,7 +721,6 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 		memset(cb->start_buf, 0, BUF_SIZE * MAX_TASKS);
 		printf(	"cb->pd->handle: %u\ncb->start_buf: %x\n",
 						cb->pd->handle,cb->start_buf);
-
 		cb->start_mr = ibv_reg_mr(cb->pd, cb->start_buf, BUF_SIZE * MAX_TASKS,
 					  IBV_ACCESS_LOCAL_WRITE | 
 					  IBV_ACCESS_REMOTE_READ |
@@ -724,8 +736,7 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 
 		for (i = 0; i < MAX_TASKS; i++) {
 			struct rdcp_task *send_task = &cb->send_tasks[i];
-
-		        list_add_tail(&send_task->task_list, &cb->task_free);
+		    list_add_tail(&send_task->task_list, &cb->task_free);
 			send_task->buf.buf = uint64_from_ptr(start_buf);
 			send_task->buf.size = BUF_SIZE;
 			send_task->buf.rkey = cb->start_mr->rkey;
@@ -756,6 +767,9 @@ error:
 	return ret;
 }
 
+/*
+ * 根据完成队列来创建接收和发送队列
+ */
 static int rdcp_create_qp(struct rdcp_cb *cb)
 {
 	struct ibv_qp_init_attr init_attr;
@@ -765,12 +779,13 @@ static int rdcp_create_qp(struct rdcp_cb *cb)
 	memset(&init_attr, 0, sizeof(init_attr));
 	init_attr.cap.max_send_wr = MAX_WR;
 	init_attr.cap.max_recv_wr = MAX_WR;
-	init_attr.cap.max_recv_sge = 1;
-	init_attr.cap.max_send_sge = 1;
-	init_attr.qp_type = IBV_QPT_RC;
-	init_attr.send_cq = cb->cq;
-	init_attr.recv_cq = cb->cq;
+	init_attr.cap.max_recv_sge = 1;					
+	init_attr.cap.max_send_sge = 1;					// 每次只能有一个缓冲区中的数据发送给对方
+	init_attr.qp_type = IBV_QPT_RC; 				// 可靠连接
+	init_attr.send_cq = cb->cq;						// 发送端完成队列
+	init_attr.recv_cq = cb->cq;						// 接收端完成队列
 
+	// 根据是否是服务端来判断根据cm_id还是child_cm_id来判断
 	if (cb->server) {
 		ret = rdma_create_qp(cb->child_cm_id, cb->pd, &init_attr);
 		if (!ret)
@@ -792,10 +807,14 @@ static void rdcp_free_qp(struct rdcp_cb *cb)
 	ibv_dealloc_pd(cb->pd);
 }
 
+/*
+ * 创建完成队列和对应的接受发送队列
+ */
 static int rdcp_setup_qp(struct rdcp_cb *cb, struct rdma_cm_id *cm_id)
 {
 	int ret;
 
+	// 申请一个保护域
 	cb->pd = ibv_alloc_pd(cm_id->verbs);
 	if (!cb->pd) {
 		// TODO use perror for verbs error prints
@@ -804,6 +823,13 @@ static int rdcp_setup_qp(struct rdcp_cb *cb, struct rdma_cm_id *cm_id)
 	}
 	VERBOSE_LOG(3, "created pd %p\n", cb->pd);
 
+	/*
+	 * 在 RDMA 操作完成时，相应的完成事件会被通知到完成通道，
+	 * 应用程序可以通过轮询完成队列或者等待通知来处理这些完成事件，
+	 * 以便执行后续的操作或者进行错误处理
+	 */
+
+	/* ibv_create_comp_channel 创建一个完成通道，用于接收 RDMA 完成事件的通知 */
 	cb->channel = ibv_create_comp_channel(cm_id->verbs);
 	if (!cb->channel) {
 		fprintf(stderr, "ibv_create_comp_channel failed\n");
@@ -814,6 +840,7 @@ static int rdcp_setup_qp(struct rdcp_cb *cb, struct rdma_cm_id *cm_id)
 	VERBOSE_LOG(3, "created channel %p\n", cb->channel);
 
 	// TODO: do we really need *2 ?
+	/* ibv_create_cq 用于创建一个完成队列（CQ）对象 */
 	cb->cq = ibv_create_cq(cm_id->verbs, CQ_DEPTH, cb,
 				cb->channel, 0);
 	if (!cb->cq) {
@@ -823,6 +850,7 @@ static int rdcp_setup_qp(struct rdcp_cb *cb, struct rdma_cm_id *cm_id)
 	}
 	VERBOSE_LOG(3, "created cq %p\n", cb->cq);
 
+	/* ibv_req_notify_cq 请求在CQ中有新的完成事件时产生通知 */
 	ret = ibv_req_notify_cq(cb->cq, 0);
 	if (ret) {
 		fprintf(stderr, "ibv_create_cq failed\n");
@@ -947,11 +975,13 @@ static int rdcp_bind_server(struct rdcp_cb *cb)
 {
 	int ret;
 
+	// 判断是ipv4还是ipv6
 	if (cb->sin.ss_family == AF_INET)
 		((struct sockaddr_in *) &cb->sin)->sin_port = cb->port;
 	else
 		((struct sockaddr_in6 *) &cb->sin)->sin6_port = cb->port;
-
+	
+	// 将该地址绑定到对应的rdma id端口
 	ret = rdma_bind_addr(cb->cm_id, (struct sockaddr *) &cb->sin);
 	if (ret) {
 		perror("rdma_bind_addr");
@@ -959,6 +989,7 @@ static int rdcp_bind_server(struct rdcp_cb *cb)
 	}
 	VERBOSE_LOG(3, "rdma_bind_addr successful\n");
 	VERBOSE_LOG(3, "rdma_listen\n");
+	// 监听rdma端口(超过3个连接请求开始拒绝)，现在只是设置状态
 	ret = rdma_listen(cb->cm_id, 3);
 	if (ret) {
 		perror("rdma_listen");

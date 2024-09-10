@@ -703,6 +703,8 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 			goto error;
 		}
 		start_buf = cb->start_buf;
+		printf(	"cb->pd->handle: %u\n cb->start_buf: %lu\n",
+						cb->pd->handle,cb->start_buf);
 
 		cb->start_mr = ibv_reg_mr(cb->pd, cb->start_buf, BUF_SIZE * MAX_TASKS,
 					  IBV_ACCESS_LOCAL_WRITE | 
@@ -1307,6 +1309,9 @@ free_qp:
 	return ret;
 }
 
+/*
+ * 建立rdma通信管道，并给出id
+ */
 static int rdcp_create_event_channel(struct rdcp_cb *cb)
 {
 	int ret;
@@ -1416,6 +1421,12 @@ int main(int argc, char *argv[])
 	if (ret)
 		goto out;
 
+	/*
+	 * 1.服务端：考虑保证没有文件相关的参数，否则进入usage()
+	 * 2.客户端：1)必须要有两个文件参数，否则usage()
+	 * 			2)目前似乎只能保证远程主机(带:)作为第二个文件参数
+	 *	处理完命令行参数，写入cb结构体中
+	 */
 	if (cb->server) {
 		if (optind < argc) {
 			usage();

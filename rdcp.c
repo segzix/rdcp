@@ -98,7 +98,7 @@ struct metadata_info {
 };
 
 #define RDCP_PORT 7171
-#define MAX_TASKS 114
+#define MAX_TASKS 113
 #define MAX_WC 16
 #define MAX_WR (MAX_TASKS + 1)
 #define BUF_SIZE (64 * 1024)

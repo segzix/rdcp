@@ -696,7 +696,7 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 	// TODO: server use rdma_buf and not start_buf but still use send_tasks
 	// TODO: client use start_buf and not rdma_buf
 
-//	if (!cb->server) {
+	if (!cb->server) {
 		char* start_buf;
 		cb->start_buf = valloc(BUF_SIZE * MAX_TASKS);
 		if (!cb->start_buf) {
@@ -742,7 +742,7 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 			send_task->sq_wr.num_sge = 1;
 			send_task->sq_wr.wr_id = 200 + i;
 		}
-//	}
+	}
 
 	ret = rdcp_setup_wr(cb);
 	if (ret)

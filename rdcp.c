@@ -681,6 +681,8 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 	}
 	memset(cb->rdma_buf, 0, BUF_SIZE * MAX_TASKS);
 
+	printf(	"cb->pd->handle: %u\ncb->rdma_buf: %x\n",
+						cb->pd->handle,cb->rdma_buf);
 	cb->rdma_mr = ibv_reg_mr(cb->pd, cb->rdma_buf, BUF_SIZE * MAX_TASKS,
 				 IBV_ACCESS_LOCAL_WRITE |
 				 IBV_ACCESS_REMOTE_READ |
@@ -703,7 +705,7 @@ static int rdcp_setup_buffers(struct rdcp_cb *cb)
 			goto error;
 		}
 		start_buf = cb->start_buf;
-		printf(	"cb->pd->handle: %u\n cb->start_buf: %x\n",
+		printf(	"cb->pd->handle: %u\ncb->start_buf: %x\n",
 						cb->pd->handle,cb->start_buf);
 
 		cb->start_mr = ibv_reg_mr(cb->pd, cb->start_buf, BUF_SIZE * MAX_TASKS,

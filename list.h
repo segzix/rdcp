@@ -16,6 +16,8 @@
         (type *)( (char *)__mptr - offsetof(type,member) );})
 #endif
 
+#define NULL 0
+
 struct list_head {
 	struct list_head *next, *prev;
 };

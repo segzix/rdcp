@@ -1,5 +1,5 @@
 // vim: set ai ts=8 sw=8 softtabstop=8:
-/*
+/**
  * Copyright (c) 2015 Roi Dayan, Slava Shwartsman.
  *
  * This software is available to you under a choice of one of two
@@ -31,23 +31,19 @@
  * SOFTWARE.
  */
 
-#include "list.h"
+#include "rdcp.h"
+#include "utils.h"
 #include <arpa/inet.h>
 #include <byteswap.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <infiniband/arch.h>
 #include <inttypes.h>
 #include <libgen.h>
-#include <linux/limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
-#include <rdma/rdma_cma.h>
-#include <semaphore.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -56,133 +52,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-
-static int verbose = 3;
-
-#define VERBOSE_LOG(level, fmt, ...)                                                               \
-    if (verbose >= level) {                                                                        \
-        printf(fmt, ##__VA_ARGS__);                                                                \
-    }
-
-#define uint64_from_ptr(p) (uint64_t)(uintptr_t)(p)
-#define ptr_from_int64(p) (void *)(unsigned long)(p)
-
-enum test_state {
-    IDLE = 1,
-    CONNECT_REQUEST,
-    ADDR_RESOLVED,
-    ROUTE_RESOLVED,
-    CONNECTED,
-    SEND_METADATA,
-    SEND_DATA,
-    RDMA_READ_ADV,
-    RDMA_READ_COMPLETE,
-    RDMA_WRITE_ADV,
-    RDMA_WRITE_COMPLETE,
-    DISCONNECTED,
-    ERROR
-};
-
-struct rdma_info {
-    int id;
-    uint64_t buf;
-    uint32_t rkey;
-    uint32_t size;
-};
-
-struct metadata_info {
-    int version; // protocol version
-    long size;
-    char src_path[PATH_MAX];
-    char dst_path[PATH_MAX];
-};
-
-#define RDCP_PORT 7171
-#define MAX_TASKS 112
-#define MAX_WC 16
-#define MAX_WR (MAX_TASKS + 1)
-#define BUF_SIZE (64 * 1024)
-#define METADATA_WR_ID 0xfffffffffffffffaULL
-#define CQ_DEPTH ((MAX_TASKS + 1) * 2)
-
-struct rdcp_task {
-    struct rdma_info buf;
-    struct ibv_sge sgl;
-    struct ibv_mr *mr;
-    union {
-        struct ibv_recv_wr rq_wr;
-        struct ibv_send_wr sq_wr;
-    };
-    struct list_head task_list;
-};
-
-/*
- * Control block struct.
- */
-struct rdcp_cb {
-    int server; /* 0 iff client */
-    pthread_t cqthread;
-    struct ibv_comp_channel *channel;
-    struct ibv_cq *cq;
-    struct ibv_pd *pd;
-    struct ibv_qp *qp;
-
-    int fd;
-    FILE *fp;
-    int sent_count;
-    int recv_count;
-    int use_null;
-
-    /* 元数据的发送请求，接收请求与句柄(均只有一个)，全部绑定元数据 */
-    struct metadata_info metadata;
-    struct ibv_mr *metadata_mr;
-    struct ibv_sge metadata_sgl;
-    struct ibv_recv_wr md_recv_wr;
-    struct ibv_send_wr md_send_wr;
-
-    /* 接收任务队列与发送任务队列，发送的任务绑定至start_buf，接收的任务绑定至自己的buf(初始化后)*/
-    struct rdcp_task recv_tasks[MAX_TASKS];
-    struct rdcp_task send_tasks[MAX_TASKS];
-
-    /*两个队列*/
-    struct list_head task_free;
-    struct list_head task_alloc;
-
-    /* rdma的数据请求队列，句柄数组，每一个句柄绑定rdma_buf中的一块内存*/
-    struct ibv_send_wr rdma_sq_wr[MAX_TASKS]; /* rdma work request record */
-    struct ibv_sge rdma_sgl[MAX_TASKS];       /* rdma single SGE */
-    char *rdma_buf;                           /* used as rdma sink */
-    struct ibv_mr *rdma_mr;
-
-    uint32_t remote_rkey; /* remote guys RKEY */
-    uint64_t remote_addr; /* remote guys TO */
-    uint32_t remote_len;  /* remote guys LEN */
-
-    char *start_buf; /* rdma read src */
-    struct ibv_mr *start_mr;
-
-    enum test_state state; /* used for cond/signalling */
-    sem_t sem;
-
-    struct sockaddr_storage sin;
-    uint16_t port; /* dst port in NBO */
-    int size;      /* ping data size */
-
-    /* CM stuff */
-    pthread_t cmthread;
-    struct rdma_event_channel *cm_channel;
-    struct rdma_cm_id *cm_id; /* connection on client side,*/
-    /* listener on service side. */
-    struct rdma_cm_id *child_cm_id; /* connection on server side */
-};
-
-long long current_timestamp() {
-    long long milliseconds;
-    struct timeval te;
-    gettimeofday(&te, NULL);                               // get current time
-    milliseconds = te.tv_sec * 1000LL + te.tv_usec / 1000; // caculate milliseconds
-    return milliseconds;
-}
+int verbose = 3;
 
 static int rdcp_cma_event_handler(struct rdma_cm_id *cma_id, struct rdma_cm_event *event) {
     int ret = 0;
@@ -217,7 +87,7 @@ static int rdcp_cma_event_handler(struct rdma_cm_id *cma_id, struct rdma_cm_even
     case RDMA_CM_EVENT_ESTABLISHED:
         VERBOSE_LOG(3, "ESTABLISHED\n");
 
-        /*
+        /**
          * Server will wake up when first RECV completes.
          */
         if (!cb->server) {
@@ -257,625 +127,6 @@ static int rdcp_cma_event_handler(struct rdma_cm_id *cma_id, struct rdma_cm_even
     return ret;
 }
 
-static int server_response(struct rdcp_cb *cb, struct ibv_wc *wc) {
-    int ret;
-    int id = wc->wr_id;
-    struct ibv_send_wr *bad_wr;
-    struct rdcp_task *send_task = &cb->send_tasks[id];
-    struct rdcp_task *recv_task = &cb->recv_tasks[id];
-
-    send_task->buf.size = recv_task->buf.size;
-    ret = ibv_post_send(cb->qp, &send_task->sq_wr, &bad_wr);
-    if (ret) {
-        perror("server response error");
-        return ret;
-    }
-    VERBOSE_LOG(1, "server posted go ahead\n");
-
-    return 0;
-}
-
-/*
- * 服务端打开要写入的文件准备进行写入
- */
-static int server_open_dest(struct rdcp_cb *cb) {
-    DIR *d;
-
-    //这里的cb->metadata是直接由客户端传进来了
-    d = opendir(cb->metadata.dst_path);
-    if (d) {
-        closedir(d);
-        // XXX: can overflow dst_path
-        strcat(cb->metadata.dst_path, "/");
-        strcat(cb->metadata.dst_path, basename(cb->metadata.src_path));
-    } else if (ENOENT == errno) {
-        // ok. create a file.
-    } else if (ENOTDIR == errno) {
-        // ok. It's not a dir. overwrite
-    } else {
-        perror("open error");
-        return errno;
-    }
-
-    printf("Content of metadata src: %s dst: %s\n", cb->metadata.src_path, cb->metadata.dst_path);
-    fflush(stdout);
-
-    cb->fd = open(cb->metadata.dst_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    if (cb->fd < 0) {
-        perror("failed to open file");
-        return errno;
-    }
-
-    VERBOSE_LOG(1, "open fd %d\n", cb->fd);
-
-    return 0;
-}
-
-/*
- * 服务端处理客户端发过来的元数据，同时将自己的元数据发送给客户端
- */
-static int server_recv_metadata(struct rdcp_cb *cb, struct ibv_wc *wc) {
-    int ret = 0;
-
-    VERBOSE_LOG(1, "Got metadata, replying\n");
-    // TODO: Send protocol version to client to verify
-    if (!cb->use_null) {
-        ret = server_open_dest(cb);
-        if (ret)
-            goto out;
-    }
-
-    /* 建立元数据发送请求(send请求已经在rdcp_setup_wr中初始化) */
-    ret = ibv_post_send(cb->qp, &cb->md_send_wr, NULL);
-    if (ret) {
-        perror("failed reply metadata");
-        close(cb->fd);
-    }
-
-out:
-    return ret;
-}
-
-/*
- * 服务端处理接收请求
- */
-static int server_recv(struct rdcp_cb *cb, struct ibv_wc *wc) {
-    struct rdcp_task *task;
-    int ret;
-    struct ibv_send_wr *bad_wr;
-    int i;
-
-    //可能是需要接收元数据(元数据主要包含了文件的相关信息)
-    if (wc->wr_id == METADATA_WR_ID) {
-        return server_recv_metadata(cb, wc);
-    }
-
-    /* 非元数据(此时传输的数据已经放入recv_tasks缓冲区了) */
-    i = wc->wr_id;
-    task = &cb->recv_tasks[i];
-
-    if (wc->byte_len != sizeof(struct rdma_info)) {
-        fprintf(stderr, "Received bogus data, size %d\n", wc->byte_len);
-        return -1;
-    }
-
-    /* 远程文件的key addr等信息*/
-    cb->remote_rkey = task->buf.rkey;
-    cb->remote_addr = task->buf.buf;
-    cb->remote_len = task->buf.size;
-    VERBOSE_LOG(1, "Received rkey %x addr %" PRIx64 " len %d from peer\n", cb->remote_rkey,
-                task->buf.buf, cb->remote_len);
-    VERBOSE_LOG(1, "rdma read %d %p\n", i, &cb->rdma_buf[i * BUF_SIZE]);
-
-    /* Issue RDMA Read. */
-    /* 处理完recv请求，通过send队列发回(注意现在是READ请求)(注意请求中一些信息是参照了远程recv请求的信息) */
-    cb->rdma_sq_wr[i].opcode = IBV_WR_RDMA_READ;
-    cb->rdma_sq_wr[i].wr.rdma.rkey = cb->remote_rkey;
-    cb->rdma_sq_wr[i].wr.rdma.remote_addr = cb->remote_addr;
-    cb->rdma_sq_wr[i].sg_list->length = cb->remote_len;
-    cb->rdma_sq_wr[i].wr_id = i;
-    ret = ibv_post_send(cb->qp, &cb->rdma_sq_wr[i], &bad_wr);
-    if (ret) {
-        perror("post rdma read failed");
-        return ret;
-    }
-    VERBOSE_LOG(3, "server posted rdma read req \n");
-
-    if (cb->state <= CONNECTED || cb->state == RDMA_WRITE_COMPLETE)
-        cb->state = RDMA_READ_ADV;
-    else
-        cb->state = RDMA_WRITE_ADV;
-
-    return 0;
-}
-
-/*
- * 客户端处理接收请求
- */
-static int client_recv(struct rdcp_cb *cb, struct ibv_wc *wc) {
-    if (wc->wr_id == METADATA_WR_ID) {
-        sem_post(&cb->sem);
-        return 0;
-    }
-
-    if (wc->byte_len != sizeof(struct rdma_info)) {
-        fprintf(stderr, "Received bogus data, size %d\n", wc->byte_len);
-        return -1;
-    }
-
-    if (cb->state == RDMA_READ_ADV)
-        cb->state = RDMA_WRITE_ADV;
-    else
-        cb->state = RDMA_WRITE_COMPLETE;
-
-    return 0;
-}
-
-/*
-* 在所有的recv tasks处理完后，将所有的tasks做成一个链表，并将第一个task的任务发送出去
- */
-static int rearm_completions(struct rdcp_cb *cb) {
-    int i, ret;
-    static int rearm = 0;
-
-    rearm++;
-    if (rearm == MAX_TASKS) {
-        struct ibv_recv_wr *wr = &cb->recv_tasks[0].rq_wr;
-        for (i = 1; i < MAX_TASKS; i++) {
-            wr->next = &cb->recv_tasks[i].rq_wr;
-            wr = &cb->recv_tasks[i].rq_wr;
-        }
-        ret = ibv_post_recv(cb->qp, &cb->recv_tasks[0].rq_wr, NULL);
-        if (ret) {
-            perror("post recv error");
-            goto error;
-        }
-        rearm = 0;
-    }
-
-    return 0;
-
-error:
-    return ret;
-}
-
-/*
- * 处理完成事件
- */
-static int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
-    int ret = 0;
-    int i;
-    int size;
-
-    if (wc->status) {
-        if (wc->status != IBV_WC_WR_FLUSH_ERR) {
-            fprintf(stderr, "cq completion id %lu failed with status %d (%s)\n",
-                    (unsigned long)wc->wr_id, wc->status, ibv_wc_status_str(wc->status));
-            ret = -1;
-        }
-        goto error;
-    }
-
-    switch (wc->opcode) {
-    case IBV_WC_SEND:
-        VERBOSE_LOG(3, "send completion\n");
-        break;
-
-    case IBV_WC_RDMA_WRITE:
-        VERBOSE_LOG(3, "rdma write completion\n");
-        cb->state = RDMA_WRITE_COMPLETE;
-        sem_post(&cb->sem);
-        break;
-
-    /* RDMA读取操作完成，准备写入文件 */
-    case IBV_WC_RDMA_READ:
-        VERBOSE_LOG(3, "rdma read completion\n");
-        i = wc->wr_id;
-
-        VERBOSE_LOG(1, "fd %d i %d rdma_buf %p\n", cb->fd, i, &cb->rdma_buf[i * BUF_SIZE]);
-        if (!cb->use_null) {
-            size = write(cb->fd, &cb->rdma_buf[i * BUF_SIZE], cb->recv_tasks[i].buf.size);
-
-            if (size < 0) {
-                printf("error writing data\n");
-                ret = size;
-                goto error;
-            }
-        }
-        ret = server_response(cb, wc);
-        if (ret)
-            goto error;
-        break;
-
-    /* 处理recv请求(发送的数据暂存到recv_tasks中) */
-    case IBV_WC_RECV:
-        VERBOSE_LOG(3, "recv completion\n");
-        ret = cb->server ? server_recv(cb, wc) : client_recv(cb, wc);
-        if (ret) {
-            perror("recv wc error");
-            goto error;
-        }
-
-        if (wc->wr_id == METADATA_WR_ID)
-            break;
-
-        rearm_completions(cb);
-
-        cb->recv_count++;
-        if (cb->recv_count >= cb->sent_count)
-            sem_post(&cb->sem);
-        break;
-
-    default:
-        VERBOSE_LOG(3, "unknown!!!!! completion\n");
-        ret = -1;
-        goto error;
-    }
-
-    if (ret) {
-        fprintf(stderr, "poll error %d\n", ret);
-        goto error;
-    }
-
-    return 0;
-
-error:
-    if (ret < 0) {
-        cb->state = ERROR;
-        //		if (cb->server)
-        //			rdma_disconnect(cb->child_cm_id);
-        //		else
-        //			rdma_disconnect(cb->cm_id);
-    }
-    sem_post(&cb->sem);
-    return ret;
-}
-
-/*
- * 轮询完成事件队列并调用handle_wc进行处理
- */
-static int rdcp_cq_event_handler(struct rdcp_cb *cb) {
-    struct ibv_wc wcs[MAX_WC];
-    int i, n;
-
-    VERBOSE_LOG(3, "poll\n");
-    while ((n = ibv_poll_cq(cb->cq, MAX_WC, wcs)) > 0) {
-        for (i = 0; i < n; i++) {
-            handle_wc(cb, &wcs[i]);
-        }
-    }
-
-    if (n < 0)
-        return n;
-
-    return 0;
-}
-
-/*
- * 建立一个新的rdma链接(等待资源被释放后)
- */
-static int rdcp_accept(struct rdcp_cb *cb) {
-    int ret;
-
-    VERBOSE_LOG(3, "accepting client connection request\n");
-
-    ret = rdma_accept(cb->child_cm_id, NULL);
-    if (ret) {
-        perror("rdma_accept");
-        return ret;
-    }
-
-    sem_wait(&cb->sem);
-    if (cb->state == ERROR) {
-        fprintf(stderr, "wait for CONNECTED state %d\n", cb->state);
-        return -1;
-    }
-    return 0;
-}
-
-static int rdcp_setup_wr(struct rdcp_cb *cb) {
-    int i;
-    char *buf = cb->rdma_buf;
-
-    /* 元数据信息注册 */
-    cb->metadata_mr =
-        ibv_reg_mr(cb->pd, &cb->metadata, sizeof(struct metadata_info), IBV_ACCESS_LOCAL_WRITE);
-    if (!cb->metadata_mr) {
-        fprintf(stderr, "metadata reg_mr failed\n");
-        return errno;
-    }
-    
-    /* 元数据的句柄(指向缓冲区) */
-    cb->metadata_sgl.addr = uint64_from_ptr(&cb->metadata);
-    cb->metadata_sgl.length = sizeof(struct metadata_info);
-    cb->metadata_sgl.lkey = cb->metadata_mr->lkey;
-
-    /* 元数据send请求的初始化(指向元数据句柄) */
-    cb->md_send_wr.opcode = IBV_WR_SEND;
-    cb->md_send_wr.send_flags = IBV_SEND_SIGNALED;
-    cb->md_send_wr.sg_list = &cb->metadata_sgl;
-    cb->md_send_wr.num_sge = 1;
-    cb->md_send_wr.wr_id = METADATA_WR_ID;
-
-    /* 元数据recv请求的初始化(指向元数据句柄) */
-    cb->md_recv_wr.sg_list = &cb->metadata_sgl;
-    cb->md_recv_wr.num_sge = 1;
-    cb->md_recv_wr.wr_id = METADATA_WR_ID;
-
-    /* rdma句柄与请求初始化，绑定至rdma_buf */
-    for (i = 0; i < MAX_TASKS; i++) {
-        cb->rdma_sgl[i].addr = uint64_from_ptr(buf);
-        cb->rdma_sgl[i].length = BUF_SIZE;
-        cb->rdma_sgl[i].lkey = cb->rdma_mr->lkey;
-        cb->rdma_sq_wr[i].send_flags = IBV_SEND_SIGNALED;
-        cb->rdma_sq_wr[i].sg_list = &cb->rdma_sgl[i];
-        cb->rdma_sq_wr[i].num_sge = 1;
-        buf += BUF_SIZE;
-    }
-
-    return 0;
-}
-
-static void rdcp_free_buffers(struct rdcp_cb *cb) {
-    int i;
-
-    VERBOSE_LOG(3, "rdcp_free_buffers called on cb %p\n", cb);
-    if (cb->start_buf)
-        free(cb->start_buf);
-    if (cb->rdma_mr)
-        ibv_dereg_mr(cb->rdma_mr);
-    if (cb->rdma_buf)
-        free(cb->rdma_buf);
-
-    for (i = 0; i < MAX_TASKS; i++) {
-        struct rdcp_task *recv_task = &cb->recv_tasks[i];
-        struct rdcp_task *send_task = &cb->send_tasks[i];
-
-        if (recv_task->mr)
-            ibv_dereg_mr(recv_task->mr);
-        if (send_task->mr)
-            ibv_dereg_mr(send_task->mr);
-    }
-    if (cb->metadata_mr)
-        ibv_dereg_mr(cb->metadata_mr);
-    //	if (!cb->server) {
-    ibv_dereg_mr(cb->start_mr);
-    //	}
-}
-
-static int rdcp_setup_buffers(struct rdcp_cb *cb) {
-    int ret;
-    int i;
-
-    VERBOSE_LOG(3, "rdcp_setup_buffers called on cb %p\n", cb);
-
-    // TODO: server use rdma_buf and not start_buf but still use send_tasks
-    // TODO: client use start_buf and not rdma_buf
-    // TODO: handle error
-    for (i = 0; i < MAX_TASKS; i++) {
-        struct rdcp_task *recv_task = &cb->recv_tasks[i];
-        struct rdcp_task *send_task = &cb->send_tasks[i];
-
-        recv_task->buf.id = i;
-        //注册recv_task缓冲区的内存
-        recv_task->mr =
-            ibv_reg_mr(cb->pd, &recv_task->buf, sizeof(struct rdma_info), IBV_ACCESS_LOCAL_WRITE);
-        if (!recv_task->mr) {
-            fprintf(stderr, "recv_buf reg_mr failed\n");
-            ret = errno;
-            goto error;
-        }
-        /*
-         * 初始化接收缓冲区的句柄(指向缓冲区)
-         * 1.地址 2.长度 3.描述内存区域的标志key
-         */
-        recv_task->sgl.addr = uint64_from_ptr(&recv_task->buf);
-        recv_task->sgl.length = sizeof(struct rdma_info);
-        recv_task->sgl.lkey = recv_task->mr->lkey;
-        /*
-         * 初始化一个接收请求
-         * 1.指向请求缓冲区的第一个句柄结构体
-         * 2.总共的句柄个数(可能会从链表出发有多个句柄)
-         * 3.请求的id号
-         */
-        recv_task->rq_wr.sg_list = &recv_task->sgl;
-        recv_task->rq_wr.num_sge = 1;
-        recv_task->rq_wr.wr_id = i;
-
-        send_task->buf.id = i;
-        //注册send_task缓冲区的内存
-        send_task->mr = ibv_reg_mr(cb->pd, &send_task->buf, sizeof(struct rdma_info), 0);
-        if (!send_task->mr) {
-            fprintf(stderr, "send_buf reg_mr failed\n");
-            ret = errno;
-            goto error;
-        }
-    }
-
-    // valloc申请内存，刷0，rdma注册内存区域进行保护
-    cb->rdma_buf = valloc(BUF_SIZE * MAX_TASKS);
-    if (!cb->rdma_buf) {
-        fprintf(stderr, "rdma_buf alloc failed\n");
-        ret = -ENOMEM;
-        goto error;
-    }
-    memset(cb->rdma_buf, 0, BUF_SIZE * MAX_TASKS);
-    printf("cb->pd->handle: %u\ncb->rdma_buf: %x\n", cb->pd->handle, cb->rdma_buf);
-    cb->rdma_mr =
-        ibv_reg_mr(cb->pd, cb->rdma_buf, BUF_SIZE * MAX_TASKS,
-                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
-    if (!cb->rdma_mr) {
-        fprintf(stderr, "rdma_buf reg_mr failed\n");
-        ret = errno;
-        goto error;
-    }
-
-    if (!cb->server) {
-        char *start_buf;
-
-        // valloc申请内存，刷0，rdma注册内存区域进行保护
-        cb->start_buf = valloc(BUF_SIZE * MAX_TASKS);
-        if (!cb->start_buf) {
-            fprintf(stderr, "start_buf malloc failed\n");
-            ret = -ENOMEM;
-            goto error;
-        }
-        start_buf = cb->start_buf;
-        memset(cb->start_buf, 0, BUF_SIZE * MAX_TASKS);
-        printf("cb->pd->handle: %u\ncb->start_buf: %x\n", cb->pd->handle, cb->start_buf);
-        cb->start_mr =
-            ibv_reg_mr(cb->pd, cb->start_buf, BUF_SIZE * MAX_TASKS,
-                       IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
-        if (!cb->start_mr) {
-            fprintf(stderr, "start_buf reg_mr failed\n");
-            ret = errno;
-            goto error;
-        }
-
-        INIT_LIST_HEAD(&cb->task_free);
-        INIT_LIST_HEAD(&cb->task_alloc);
-
-        /*客户端初始化send_tasks(将类型也设置好为IBV_WR_SEND)*/
-        for (i = 0; i < MAX_TASKS; i++) {
-            struct rdcp_task *send_task = &cb->send_tasks[i];
-            list_add_tail(&send_task->task_list, &cb->task_free);
-
-            /* send_task的buf来自start_buf的切分 */
-            send_task->buf.buf = uint64_from_ptr(start_buf);
-            send_task->buf.size = BUF_SIZE;
-            send_task->buf.rkey = cb->start_mr->rkey;
-
-            /* 初始化send_task的句柄与请求(可能包含多个句柄)，绑定至send_task的buf，实际上就是绑定至start_buf的某块区域 */
-            send_task->sgl.addr = uint64_from_ptr(&send_task->buf);
-            send_task->sgl.length = sizeof(struct rdma_info);
-            send_task->sgl.lkey = send_task->mr->lkey;
-
-            send_task->sq_wr.opcode = IBV_WR_SEND;
-            send_task->sq_wr.send_flags = IBV_SEND_SIGNALED;
-            send_task->sq_wr.sg_list = &send_task->sgl;
-            send_task->sq_wr.num_sge = 1;
-            send_task->sq_wr.wr_id = 200 + i;
-
-            start_buf += BUF_SIZE;
-        }
-    }
-
-    ret = rdcp_setup_wr(cb);
-    if (ret)
-        goto error;
-
-    VERBOSE_LOG(3, "allocated & registered buffers...\n");
-    return 0;
-
-error:
-    rdcp_free_buffers(cb);
-    return ret;
-}
-
-/*
- * 根据完成队列来创建接收和发送队列
- */
-static int rdcp_create_qp(struct rdcp_cb *cb) {
-    struct ibv_qp_init_attr init_attr;
-    int ret;
-
-    // TODO: check values
-    memset(&init_attr, 0, sizeof(init_attr));
-    init_attr.cap.max_send_wr = MAX_WR;
-    init_attr.cap.max_recv_wr = MAX_WR;
-    init_attr.cap.max_recv_sge = 1;
-    init_attr.cap.max_send_sge = 1; // 每次只能有一个缓冲区中的数据发送给对方
-    init_attr.qp_type = IBV_QPT_RC; // 可靠连接
-    init_attr.send_cq = cb->cq;     // 发送端完成队列
-    init_attr.recv_cq = cb->cq;     // 接收端完成队列
-
-    // 根据是否是服务端来判断根据cm_id还是child_cm_id来判断
-    if (cb->server) {
-        ret = rdma_create_qp(cb->child_cm_id, cb->pd, &init_attr);
-        if (!ret)
-            cb->qp = cb->child_cm_id->qp;
-    } else {
-        ret = rdma_create_qp(cb->cm_id, cb->pd, &init_attr);
-        if (!ret)
-            cb->qp = cb->cm_id->qp;
-    }
-
-    return ret;
-}
-
-static void rdcp_free_qp(struct rdcp_cb *cb) {
-    ibv_destroy_qp(cb->qp);
-    ibv_destroy_cq(cb->cq);
-    ibv_destroy_comp_channel(cb->channel);
-    ibv_dealloc_pd(cb->pd);
-}
-
-/*
- * 创建完成队列和对应的接受发送队列
- */
-static int rdcp_setup_qp(struct rdcp_cb *cb, struct rdma_cm_id *cm_id) {
-    int ret;
-
-    // 申请一个保护域
-    cb->pd = ibv_alloc_pd(cm_id->verbs);
-    if (!cb->pd) {
-        // TODO use perror for verbs error prints
-        fprintf(stderr, "ibv_alloc_pd failed\n");
-        return errno;
-    }
-    VERBOSE_LOG(3, "created pd %p\n", cb->pd);
-
-    /*
-     * 在 RDMA 操作完成时，相应的完成事件会被通知到完成通道，
-     * 应用程序可以通过轮询完成队列或者等待通知来处理这些完成事件，
-     * 以便执行后续的操作或者进行错误处理
-     */
-
-    /* ibv_create_comp_channel 创建一个完成通道，用于接收 RDMA 完成事件的通知 */
-    cb->channel = ibv_create_comp_channel(cm_id->verbs);
-    if (!cb->channel) {
-        fprintf(stderr, "ibv_create_comp_channel failed\n");
-        ret = errno;
-        // TODO: use real labels. e.g. err_create_channel or free_pd
-        goto free_pd;
-    }
-    VERBOSE_LOG(3, "created channel %p\n", cb->channel);
-
-    // TODO: do we really need *2 ?
-    /* ibv_create_cq 用于创建一个完成队列（CQ）对象 */
-    cb->cq = ibv_create_cq(cm_id->verbs, CQ_DEPTH, cb, cb->channel, 0);
-    if (!cb->cq) {
-        fprintf(stderr, "ibv_create_cq failed\n");
-        ret = errno;
-        goto free_comp_chan;
-    }
-    VERBOSE_LOG(3, "created cq %p\n", cb->cq);
-
-    /* ibv_req_notify_cq 请求在CQ中有新的完成事件时产生通知 */
-    ret = ibv_req_notify_cq(cb->cq, 0);
-    if (ret) {
-        fprintf(stderr, "ibv_create_cq failed\n");
-        ret = errno;
-        goto free_cq;
-    }
-
-    ret = rdcp_create_qp(cb);
-    if (ret) {
-        perror("rdma_create_qp");
-        goto free_cq;
-    }
-    VERBOSE_LOG(3, "created qp %p\n", cb->qp);
-    return 0;
-
-free_cq:
-    ibv_destroy_cq(cb->cq);
-free_comp_chan:
-    ibv_destroy_comp_channel(cb->channel);
-free_pd:
-    ibv_dealloc_pd(cb->pd);
-    return ret;
-}
-
 static void *cm_thread(void *arg) {
     struct rdcp_cb *cb = arg;
     struct rdma_cm_event *event;
@@ -902,111 +153,6 @@ static void *cm_thread(void *arg) {
     }
 }
 
-static void *cq_thread(void *arg) {
-    struct rdcp_cb *cb = arg;
-    struct ibv_cq *ev_cq;
-    void *ev_ctx;
-    int ret;
-    long long tick1, tick2;
-
-    VERBOSE_LOG(3, "cq_thread started.\n");
-
-    /*
-     * 创建的线程在这里循环，不断轮询完成事件
-     */
-    while (1) {
-
-        //查询当前线程是否有被取消
-        pthread_testcancel();
-
-        tick1 = current_timestamp();
-        VERBOSE_LOG(3, "wait for cq event\n");
-
-        //通过完成通道cb->channel获取完成队列里的完成事件(队列存储在ev_cq中，事件上下文信息存储在ev_ctx中)
-        ret = ibv_get_cq_event(cb->channel, &ev_cq, &ev_ctx);
-        if (ret) {
-            fprintf(stderr, "Failed to get cq event!\n");
-            pthread_exit(NULL);
-        }
-
-        tick2 = current_timestamp();
-        if (tick2 - tick1 > 1000) {
-            VERBOSE_LOG(1, "got pause %f\n", (tick2 - tick1) / 1000.0);
-        }
-
-        //完成队列应该和cb结构体中规定的一致，否则报错
-        if (ev_cq != cb->cq) {
-            fprintf(stderr, "Unknown CQ!\n");
-            pthread_exit(NULL);
-        }
-
-        //确认一个完成事件
-        ibv_ack_cq_events(cb->cq, 1);
-
-        VERBOSE_LOG(3, "handle cq event\n");
-        ret = rdcp_cq_event_handler(cb);
-        if (ret) {
-            VERBOSE_LOG(3, "ERROR: handle event, killing cq_thread\n");
-            pthread_exit(NULL);
-        }
-
-        if (cb->state == ERROR)
-            printf("ERROR state\n");
-        if (cb->state >= DISCONNECTED)
-            pthread_exit(NULL);
-
-        ret = ibv_req_notify_cq(cb->cq, 0);
-        if (ret) {
-            fprintf(stderr, "Failed to set notify!\n");
-            pthread_exit(NULL);
-        }
-    }
-}
-
-/*
- * test server?为什么要一直sem_wait等待
- */
-static int rdcp_test_server(struct rdcp_cb *cb) {
-    int ret = 0;
-
-    while (1) {
-        /* Wait for client's Start STAG/TO/Len */
-        sem_wait(&cb->sem);
-    }
-
-    close(cb->fd);
-    cb->fd = -1;
-
-    return (cb->state == DISCONNECTED) ? 0 : ret;
-}
-
-static int rdcp_bind_server(struct rdcp_cb *cb) {
-    int ret;
-
-    // 判断是ipv4还是ipv6
-    if (cb->sin.ss_family == AF_INET)
-        ((struct sockaddr_in *)&cb->sin)->sin_port = cb->port;
-    else
-        ((struct sockaddr_in6 *)&cb->sin)->sin6_port = cb->port;
-
-    // 将该地址绑定到对应的rdma id端口
-    ret = rdma_bind_addr(cb->cm_id, (struct sockaddr *)&cb->sin);
-    if (ret) {
-        perror("rdma_bind_addr");
-        return ret;
-    }
-    VERBOSE_LOG(3, "rdma_bind_addr successful\n");
-    VERBOSE_LOG(3, "rdma_listen\n");
-    // 监听rdma端口(超过3个连接请求开始拒绝)，现在只是设置状态
-    ret = rdma_listen(cb->cm_id, 3);
-    if (ret) {
-        perror("rdma_listen");
-        return ret;
-    }
-
-    return 0;
-}
-
 static int rdcp_run_server(struct rdcp_cb *cb) {
     struct ibv_recv_wr *bad_wr;
     int i, ret;
@@ -1021,27 +167,28 @@ static int rdcp_run_server(struct rdcp_cb *cb) {
         return -1;
     }
 
-    /* 建立接受请求队列对(qp为队列对，cq为完成队列) */
+    /** 建立接受请求队列对(qp为队列对，cq为完成队列) */
     ret = rdcp_setup_qp(cb, cb->child_cm_id);
     if (ret) {
         fprintf(stderr, "setup_qp failed: %d\n", ret);
         return ret;
     }
 
+    /** 为队列将对应的recv send rdma内存创建好 */
     ret = rdcp_setup_buffers(cb);
     if (ret) {
         fprintf(stderr, "rdcp_setup_buffers failed: %d\n", ret);
         goto free_qp;
     }
 
-    /* 将元数据的recv请求绑定到提交接收工作请求的队列对 */
+    /** 将元数据的recv请求绑定到提交接收工作请求的队列对(准备工作做好) */
     ret = ibv_post_recv(cb->qp, &cb->md_recv_wr, &bad_wr);
     if (ret) {
         perror("error post recv metadata");
         goto free_buffers;
     }
 
-    /* 将recv tasks绑定到提交接收工作请求的队列对 */
+    /** 将recv tasks绑定到提交接收工作请求的队列对(准备工作做好) */
     for (i = 0; i < MAX_TASKS; i++) {
         ret = ibv_post_recv(cb->qp, &cb->recv_tasks[i].rq_wr, &bad_wr);
         if (ret) {
@@ -1050,10 +197,10 @@ static int rdcp_run_server(struct rdcp_cb *cb) {
         }
     }
 
-    /* 创建一个线程 */
+    /** 创建一个线程 */
     pthread_create(&cb->cqthread, NULL, cq_thread, cb);
 
-    /* 创建一个rdma连接 */
+    /** 创建一个rdma连接 */
     ret = rdcp_accept(cb);
     if (ret) {
         fprintf(stderr, "connect error %d\n", ret);
@@ -1083,197 +230,6 @@ free_buffers:
 free_qp:
     rdcp_free_qp(cb);
     return ret;
-}
-
-static void print_send_status(struct rdcp_cb *cb, long *_total_size, int print) {
-    static long long tick1 = 0, tick2 = 0;
-    static long sent_size = 0;
-    long total_size = *_total_size;
-
-    if (tick1 == 0)
-        tick1 = current_timestamp();
-
-    tick2 = current_timestamp();
-    VERBOSE_LOG(3, "tick %lld\n", tick2);
-
-    if (tick2 - tick1 >= 1000 || print) {
-        float sec = (tick2 - tick1) / 1000.0;
-        long mb = 1024 * 1024;
-        long gb = 1024 * mb;
-        int percent = 100;
-        long eta = 0;
-        char size_spec[3] = "MB";
-        long div = mb;
-        float bytes_per_sec = total_size / sec;
-
-        sent_size += total_size;
-        if (cb->metadata.size > 0) {
-            percent = sent_size * 100 / cb->metadata.size;
-            eta = ((cb->metadata.size - sent_size) / bytes_per_sec);
-        }
-        if (sent_size > 10 * gb) {
-            strcpy(size_spec, "GB");
-            div = gb;
-        }
-        printf("\r%-20s %d%% %5d%s %5dMB/s  %02d:%02d ETA", basename(cb->metadata.src_path),
-               percent, (int)(sent_size / div), size_spec, (int)(bytes_per_sec / mb),
-               (int)(eta / 60), (int)(eta % 60));
-        fflush(stdout);
-        total_size = 0;
-        *_total_size = 0;
-        tick1 = tick2;
-    }
-}
-
-static int rdcp_test_client(struct rdcp_cb *cb) {
-    int i, ret = 0;
-    struct ibv_send_wr *bad_wr;
-    int size;
-    long total_size = 0;
-
-    if (!cb->use_null) {
-        cb->fd = open(cb->metadata.src_path, O_RDONLY);
-        VERBOSE_LOG(1, "open fd %d\n", cb->fd);
-        if (cb->fd < 0) {
-            perror("Couldn't open file");
-            goto out;
-        }
-        cb->fp = fdopen(cb->fd, "rb");
-        fseek(cb->fp, 0, SEEK_END);
-        cb->metadata.size = ftell(cb->fp);
-        if (cb->metadata.size <= 0) {
-            perror("size error");
-            goto out;
-        }
-        fseek(cb->fp, 0, SEEK_SET);
-    } else {
-        cb->metadata.size = 0;
-    }
-
-    // send meta
-    //
-    VERBOSE_LOG(1, "Sending metadata to server\n");
-    ret = ibv_post_send(cb->qp, &cb->md_send_wr, &bad_wr);
-    sem_wait(&cb->sem);
-    // TODO check state we got metata and not error/disconnect
-
-    if (cb->state >= DISCONNECTED) {
-        ret = -1;
-        goto out;
-    }
-    // send file
-    //
-    VERBOSE_LOG(1, "start\n");
-    do {
-        cb->state = RDMA_READ_ADV;
-        cb->recv_count = 0;
-        cb->sent_count = 0;
-
-        VERBOSE_LOG(1, "send tasks\n");
-        for (i = 0; i < MAX_TASKS; i++) {
-            struct rdcp_task *send_task = &cb->send_tasks[i];
-            struct rdma_info *info = &send_task->buf;
-
-            if (cb->use_null) {
-                size = BUF_SIZE;
-            } else {
-                size = read(cb->fd, ptr_from_int64(info->buf), BUF_SIZE);
-                VERBOSE_LOG(1, "Read size = %d\n", size);
-            }
-
-            if (size == 0)
-                break;
-
-            if (size < 0) {
-                perror("error reading file\n");
-                break;
-            }
-
-            VERBOSE_LOG(3, "RDMA addr %" PRIx64 " rkey %x len %d\n", info->buf, info->rkey,
-                        info->size);
-            info->size = size;
-            ret = ibv_post_send(cb->qp, &send_task->sq_wr, &bad_wr);
-            if (ret) {
-                perror("send task failed");
-                break;
-            }
-
-            cb->sent_count++;
-            total_size += size;
-        }
-
-        /* Wait for server to ACK */
-        VERBOSE_LOG(1, "wait for server respond\n");
-        while (cb->recv_count < i) {
-            sem_wait(&cb->sem);
-        }
-
-        print_send_status(cb, &total_size, size < BUF_SIZE);
-    } while (size > 0);
-
-    printf("\n");
-    VERBOSE_LOG(1, "done\n");
-
-out:
-    fclose(cb->fp);
-    cb->fd = -1;
-
-    return (cb->state == DISCONNECTED) ? 0 : ret;
-}
-
-static int rdcp_connect_client(struct rdcp_cb *cb) {
-    struct rdma_conn_param conn_param;
-    int ret;
-
-    memset(&conn_param, 0, sizeof conn_param);
-    conn_param.responder_resources = 1;
-    conn_param.initiator_depth = 1;
-    conn_param.retry_count = 7;
-    // if we need retry because we miss recv wr
-    //	conn_param.rnr_retry_count = 6;
-
-    ret = rdma_connect(cb->cm_id, &conn_param);
-    if (ret) {
-        perror("rdma_connect");
-        return ret;
-    }
-
-    sem_wait(&cb->sem);
-    if (cb->state != CONNECTED) {
-        fprintf(stderr, "wait for CONNECTED state %d\n", cb->state);
-        return -1;
-    }
-
-    VERBOSE_LOG(3, "rmda_connect successful\n");
-    return 0;
-}
-
-/*
- * rdma绑定客户端
- */
-static int rdcp_bind_client(struct rdcp_cb *cb) {
-    int ret;
-
-    if (cb->sin.ss_family == AF_INET)
-        ((struct sockaddr_in *)&cb->sin)->sin_port = cb->port;
-    else
-        ((struct sockaddr_in6 *)&cb->sin)->sin6_port = cb->port;
-
-    /* 解析地址信息进行绑定 */
-    ret = rdma_resolve_addr(cb->cm_id, NULL, (struct sockaddr *)&cb->sin, 2000);
-    if (ret) {
-        perror("rdma_resolve_addr");
-        return ret;
-    }
-
-    sem_wait(&cb->sem);
-    if (cb->state != ROUTE_RESOLVED) {
-        fprintf(stderr, "waiting for addr/route resolution state %d\n", cb->state);
-        return -1;
-    }
-
-    VERBOSE_LOG(3, "rdma_resolve_addr - rdma_resolve_route successful\n");
-    return 0;
 }
 
 static int rdcp_run_client(struct rdcp_cb *cb) {
@@ -1306,7 +262,7 @@ static int rdcp_run_client(struct rdcp_cb *cb) {
         goto free_qp;
     }
 
-    /* 接收端的工作全部准备好 */
+    /** 接收端的工作全部准备好 */
     ret = ibv_post_recv(cb->qp, &cb->md_recv_wr, &bad_wr);
 
     for (i = 0; i < MAX_TASKS; i++) {
@@ -1346,68 +302,6 @@ free_qp:
     rdcp_free_qp(cb);
 
     return ret;
-}
-
-/*
- * 建立rdma通信管道，并给出id
- */
-static int rdcp_create_event_channel(struct rdcp_cb *cb) {
-    int ret;
-
-    cb->cm_channel = rdma_create_event_channel();
-    if (!cb->cm_channel) {
-        perror("rdma_create_event_channel");
-        return errno;
-    }
-
-    ret = rdma_create_id(cb->cm_channel, &cb->cm_id, cb, RDMA_PS_TCP);
-    if (ret) {
-        perror("rdma_create_id");
-        goto destroy_event_chan;
-    }
-    VERBOSE_LOG(3, "created cm_id %p\n", cb->cm_id);
-
-    return 0;
-
-destroy_event_chan:
-    rdma_destroy_event_channel(cb->cm_channel);
-    return ret;
-}
-
-static void rdcp_destroy_event_channel(struct rdcp_cb *cb) {
-    VERBOSE_LOG(3, "destroy cm_id %p\n", cb->cm_id);
-    rdma_destroy_id(cb->cm_id);
-    rdma_destroy_event_channel(cb->cm_channel);
-}
-
-static int get_addr(char *dst, struct sockaddr *addr) {
-    struct addrinfo *res;
-    int ret;
-
-    ret = getaddrinfo(dst, NULL, NULL, &res);
-    if (ret) {
-        printf("getaddrinfo failed - invalid hostname or IP address\n");
-        return ret;
-    }
-
-    if (res->ai_family == PF_INET)
-        memcpy(addr, res->ai_addr, sizeof(struct sockaddr_in));
-    else if (res->ai_family == PF_INET6)
-        memcpy(addr, res->ai_addr, sizeof(struct sockaddr_in6));
-    else
-        ret = -1;
-
-    freeaddrinfo(res);
-    return ret;
-}
-
-static void usage() {
-    printf("usage: rdcp -s [-vt] [-p port]\n");
-    printf("       rdcp [-vt] [-p port] file1 host2:file2\n\n");
-    printf("  -s        server mode\n");
-    printf("  -t        null device\n");
-    printf("  -v        verbose mode\n");
-    printf("  -p port   port\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -1455,7 +349,7 @@ int main(int argc, char *argv[]) {
     if (ret)
         goto out;
 
-    /*
+    /**
      * 1.服务端：考虑保证没有文件相关的参数，否则进入usage()
      * 2.客户端：1)必须要有两个文件参数，否则usage()
      * 			2)目前似乎只能保证远程主机(带:)作为第二个文件参数

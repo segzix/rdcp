@@ -55,7 +55,6 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             goto error;
         }
     }
-    VERBOSE_LOG(1, "1");
 
     // valloc申请内存，刷0，rdma注册内存区域进行保护
     cb->rdma_buf = valloc(BUF_SIZE * MAX_TASKS);
@@ -64,7 +63,6 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         ret = -ENOMEM;
         goto error;
     }
-    VERBOSE_LOG(1, "2");
     memset(cb->rdma_buf, 0, BUF_SIZE * MAX_TASKS);
     // printf("cb->pd->handle: %u\ncb->rdma_buf: %x\n", cb->pd->handle, cb->rdma_buf);
     cb->rdma_mr =
@@ -76,7 +74,6 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         goto error;
     }
 
-    VERBOSE_LOG(1, "cb->server: %d\n", cb->server);
     if (!cb->server) {
         char *start_buf;
 
@@ -126,6 +123,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             start_buf += BUF_SIZE;
         }
     } else {
+        VERBOSE_LOG(1, "enter server\n");
         /** 客户端初始化send_tasks(将类型也设置好为IBV_WR_SEND) */
         for (i = 0; i < MAX_TASKS; i++) {
             struct rdcp_task *send_task = &cb->send_tasks[i];
@@ -140,7 +138,6 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sgl.lkey = send_task->mr->lkey;
             
             VERBOSE_LOG(1, "send task sgl\n");
-            fprintf(stderr, "send task sgl\n");
             /**
              * 初始化一个接收请求
              * 1.指向请求缓冲区的第一个句柄结构体

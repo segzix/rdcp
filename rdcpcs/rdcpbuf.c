@@ -74,7 +74,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         goto error;
     }
 
-    fprintf("cb->server: %d", cb->server);
+    VERBOSE_LOG(1, "cb->server: %d", cb->server);
     if (!cb->server) {
         char *start_buf;
 
@@ -137,6 +137,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sgl.length = sizeof(struct rdma_info);
             send_task->sgl.lkey = send_task->mr->lkey;
             
+            VERBOSE_LOG(1, "send task sgl\n");
             fprintf(stderr, "send task sgl\n");
             /**
              * 初始化一个接收请求
@@ -150,7 +151,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sq_wr.num_sge = 1;
             send_task->sq_wr.wr_id = 200 + i;
             
-            fprintf(stderr, "send task wr\n");
+            VERBOSE_LOG(1, "send task sgl\n");
         }
     }
 

@@ -195,7 +195,7 @@ error:
 }
 
 /**
- * 在所有的recv tasks处理完后，将所有的tasks做成一个链表，并将第一个task的任务发送出去
+ * 在所有的recv tasks处理完后，重置所有recv_tasks
  */
 int rearm_completions(struct rdcp_cb *cb) {
     int i, ret;

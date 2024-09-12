@@ -208,6 +208,13 @@ int server_recv(struct rdcp_cb *cb, struct ibv_wc *wc) {
     }
     VERBOSE_LOG(3, "server posted rdma read req \n");
 
+    ret = ibv_post_send(cb->qp, &cb->send_tasks[i].sq_wr, &bad_wr);
+    if (ret) {
+        perror("post send ack failed");
+        return ret;
+    }
+    VERBOSE_LOG(3, "server posted ack req \n");
+
     if (cb->state <= CONNECTED || cb->state == RDMA_WRITE_COMPLETE)
         cb->state = RDMA_READ_ADV;
     else

@@ -55,6 +55,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             goto error;
         }
     }
+    VERBOSE_LOG(1, "1");
 
     // valloc申请内存，刷0，rdma注册内存区域进行保护
     cb->rdma_buf = valloc(BUF_SIZE * MAX_TASKS);
@@ -63,6 +64,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         ret = -ENOMEM;
         goto error;
     }
+    VERBOSE_LOG(1, "2");
     memset(cb->rdma_buf, 0, BUF_SIZE * MAX_TASKS);
     // printf("cb->pd->handle: %u\ncb->rdma_buf: %x\n", cb->pd->handle, cb->rdma_buf);
     cb->rdma_mr =
@@ -74,7 +76,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         goto error;
     }
 
-    VERBOSE_LOG(1, "cb->server: %d", cb->server);
+    VERBOSE_LOG(1, "cb->server: %d\n", cb->server);
     if (!cb->server) {
         char *start_buf;
 

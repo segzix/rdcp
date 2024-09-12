@@ -122,6 +122,31 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             start_buf += BUF_SIZE;
         }
     }
+    // else{
+    //     /** 客户端初始化send_tasks(将类型也设置好为IBV_WR_SEND) */
+    //     for (i = 0; i < MAX_TASKS; i++) {
+    //         struct rdcp_task *send_task = &cb->send_tasks[i];
+    //         list_add_tail(&send_task->task_list, &cb->task_free);
+
+    //         /** send_task的buf来自start_buf的切分 */
+    //         send_task->buf.buf = uint64_from_ptr(start_buf);
+    //         send_task->buf.size = BUF_SIZE;
+    //         send_task->buf.rkey = cb->start_mr->rkey;
+
+    //         /** 初始化send_task的句柄与请求(可能包含多个句柄)，绑定至send_task的buf，实际上就是绑定至start_buf的某块区域 */
+    //         send_task->sgl.addr = uint64_from_ptr(&send_task->buf);
+    //         send_task->sgl.length = sizeof(struct rdma_info);
+    //         send_task->sgl.lkey = send_task->mr->lkey;
+
+    //         send_task->sq_wr.opcode = IBV_WR_SEND;
+    //         send_task->sq_wr.send_flags = IBV_SEND_SIGNALED;
+    //         send_task->sq_wr.sg_list = &send_task->sgl;
+    //         send_task->sq_wr.num_sge = 1;
+    //         send_task->sq_wr.wr_id = 200 + i;
+
+    //         start_buf += BUF_SIZE;
+    //     }
+    // }
 
     for (unsigned i = 0; i < MAX_TASKS; i++) {
         VERBOSE_LOG(1, "rdma send buf addr: %lx size: %u id: %d rkey: %u\n",

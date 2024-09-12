@@ -186,6 +186,12 @@ int server_recv(struct rdcp_cb *cb, struct ibv_wc *wc) {
         return -1;
     }
 
+    for (unsigned i = 0; i < MAX_TASKS; i++) {
+        VERBOSE_LOG(1, "rdma recv buf(after recv) addr: %lx size: %u id: %d rkey: %u\n",
+                    task->buf.buf, task->buf.size, task->buf.id,
+                    task->buf.rkey);
+    }
+
     /** 远程文件的key addr等信息*/
     cb->remote_rkey = task->buf.rkey;
     cb->remote_addr = task->buf.buf;

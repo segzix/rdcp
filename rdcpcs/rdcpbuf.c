@@ -123,6 +123,17 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         }
     }
 
+    for (unsigned i = 0; i < MAX_TASKS; i++) {
+        VERBOSE_LOG(3, "rdma send buf addr: %lu size: %u id: %d rkey: %u", cb->send_tasks[i].buf.buf,
+                    cb->send_tasks[i].buf.size, cb->send_tasks[i].buf.id,
+                    cb->send_tasks[i].buf.rkey);
+    }
+    for (unsigned i = 0; i < MAX_TASKS; i++) {
+        VERBOSE_LOG(3, "rdma recv buf addr: %lu size: %u id: %d rkey: %u", cb->recv_tasks[i].buf.buf,
+                    cb->recv_tasks[i].buf.size, cb->recv_tasks[i].buf.id,
+                    cb->recv_tasks[i].buf.rkey);
+    }
+
     ret = rdcp_setup_wr(cb);
     if (ret)
         goto error;

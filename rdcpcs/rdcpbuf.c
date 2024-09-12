@@ -1,6 +1,7 @@
 #include "rdcp.h"
 #include "utils.h"
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -73,6 +74,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         goto error;
     }
 
+    fprintf("cb->server: %d", cb->server);
     if (!cb->server) {
         char *start_buf;
 

@@ -129,6 +129,8 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             struct rdcp_task *send_task = &cb->send_tasks[i];
             list_add_tail(&send_task->task_list, &cb->task_free);
 
+            VERBOSE_LOG(1, "finish list\n");
+
             /**
              * 初始化接收缓冲区的句柄(指向缓冲区)
              * 1.地址 2.长度 3.描述内存区域的标志key

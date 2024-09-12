@@ -64,7 +64,6 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         goto error;
     }
     memset(cb->rdma_buf, 0, BUF_SIZE * MAX_TASKS);
-    // printf("cb->pd->handle: %u\ncb->rdma_buf: %x\n", cb->pd->handle, cb->rdma_buf);
     cb->rdma_mr =
         ibv_reg_mr(cb->pd, cb->rdma_buf, BUF_SIZE * MAX_TASKS,
                    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
@@ -73,6 +72,10 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         ret = errno;
         goto error;
     }
+
+    /** 初始化队列 */
+    INIT_LIST_HEAD(&cb->task_free);
+    INIT_LIST_HEAD(&cb->task_alloc);
 
     if (!cb->server) {
         char *start_buf;
@@ -96,14 +99,9 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             goto error;
         }
 
-        INIT_LIST_HEAD(&cb->task_free);
-        INIT_LIST_HEAD(&cb->task_alloc);
-
         /** 客户端初始化send_tasks(将类型也设置好为IBV_WR_SEND) */
         for (i = 0; i < MAX_TASKS; i++) {
             struct rdcp_task *send_task = &cb->send_tasks[i];
-            VERBOSE_LOG(1, "task_list: %lx task_free: %lx\n", &send_task->task_list,
-                        &cb->task_free);
             list_add_tail(&send_task->task_list, &cb->task_free);
 
             /** send_task的buf来自start_buf的切分 */
@@ -125,19 +123,11 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             start_buf += BUF_SIZE;
         }
     } else {
-        VERBOSE_LOG(1, "enter server\n");
-        INIT_LIST_HEAD(&cb->task_free);
-        INIT_LIST_HEAD(&cb->task_alloc);
-        /** 客户端初始化send_tasks(将类型也设置好为IBV_WR_SEND) */
+        /** 服务端初始化send_tasks(将类型也设置好为IBV_WR_SEND) */
         for (i = 0; i < MAX_TASKS; i++) {
-            VERBOSE_LOG(1, "enter for\n");
 
             struct rdcp_task *send_task = &cb->send_tasks[i];
-            VERBOSE_LOG(1, "task_list: %lx task_free: %lx\n", &send_task->task_list,
-                        &cb->task_free);
             list_add_tail(&send_task->task_list, &cb->task_free);
-
-            VERBOSE_LOG(1, "finish list\n");
 
             /**
              * 初始化接收缓冲区的句柄(指向缓冲区)
@@ -147,7 +137,6 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sgl.length = sizeof(struct rdma_info);
             send_task->sgl.lkey = send_task->mr->lkey;
 
-            VERBOSE_LOG(1, "send task sgl\n");
             /**
              * 初始化一个接收请求
              * 1.指向请求缓冲区的第一个句柄结构体
@@ -159,20 +148,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sq_wr.sg_list = &send_task->sgl;
             send_task->sq_wr.num_sge = 1;
             send_task->sq_wr.wr_id = 200 + i;
-
-            VERBOSE_LOG(1, "send task sgl\n");
         }
-    }
-
-    for (unsigned i = 0; i < MAX_TASKS; i++) {
-        VERBOSE_LOG(1, "rdma send buf addr: %lx size: %u id: %d rkey: %u\n",
-                    cb->send_tasks[i].buf.buf, cb->send_tasks[i].buf.size, cb->send_tasks[i].buf.id,
-                    cb->send_tasks[i].buf.rkey);
-    }
-    for (unsigned i = 0; i < MAX_TASKS; i++) {
-        VERBOSE_LOG(1, "rdma recv buf addr: %lu size: %u id: %d rkey: %u\n",
-                    cb->recv_tasks[i].buf.buf, cb->recv_tasks[i].buf.size, cb->recv_tasks[i].buf.id,
-                    cb->recv_tasks[i].buf.rkey);
     }
 
     ret = rdcp_setup_wr(cb);

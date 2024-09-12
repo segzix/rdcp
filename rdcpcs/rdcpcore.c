@@ -106,6 +106,7 @@ int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
     int i;
     int size;
 
+    VERBOSE_LOG(3, "wc->wr_id: %lu\n", wc->wr_id);
     if (wc->status) {
         if (wc->status != IBV_WC_WR_FLUSH_ERR) {
             fprintf(stderr, "cq completion id %lu failed with status %d (%s)\n",

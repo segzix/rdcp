@@ -52,7 +52,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-int verbose = 1;
+int verbose = 3;
 
 static void *cm_thread(void *arg);
 static int rdcp_cma_event_handler(struct rdma_cm_id *cma_id, struct rdma_cm_event *event);

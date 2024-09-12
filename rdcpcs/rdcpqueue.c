@@ -5,37 +5,6 @@
 #include <unistd.h>
 
 /**
- * 根据完成队列来创建接收和发送队列
- */
-int rdcp_create_qp(struct rdcp_cb *cb) {
-    struct ibv_qp_init_attr init_attr;
-    int ret;
-
-    // TODO: check values
-    memset(&init_attr, 0, sizeof(init_attr));
-    init_attr.cap.max_send_wr = MAX_WR;
-    init_attr.cap.max_recv_wr = MAX_WR;
-    init_attr.cap.max_recv_sge = 1;
-    init_attr.cap.max_send_sge = 1; // 每次只能有一个缓冲区中的数据发送给对方
-    init_attr.qp_type = IBV_QPT_RC; // 可靠连接
-    init_attr.send_cq = cb->cq;     // 发送端完成队列
-    init_attr.recv_cq = cb->cq;     // 接收端完成队列
-
-    // 根据是否是服务端来判断根据cm_id还是child_cm_id来判断
-    if (cb->server) {
-        ret = rdma_create_qp(cb->child_cm_id, cb->pd, &init_attr);
-        if (!ret)
-            cb->qp = cb->child_cm_id->qp;
-    } else {
-        ret = rdma_create_qp(cb->cm_id, cb->pd, &init_attr);
-        if (!ret)
-            cb->qp = cb->cm_id->qp;
-    }
-
-    return ret;
-}
-
-/**
  * 创建完成队列和对应的接受发送队列
  */
 int rdcp_setup_qp(struct rdcp_cb *cb, struct rdma_cm_id *cm_id) {
@@ -98,6 +67,37 @@ free_comp_chan:
     ibv_destroy_comp_channel(cb->channel);
 free_pd:
     ibv_dealloc_pd(cb->pd);
+    return ret;
+}
+
+/**
+ * 根据完成队列来创建接收和发送队列
+ */
+int rdcp_create_qp(struct rdcp_cb *cb) {
+    struct ibv_qp_init_attr init_attr;
+    int ret;
+
+    // TODO: check values
+    memset(&init_attr, 0, sizeof(init_attr));
+    init_attr.cap.max_send_wr = MAX_WR;
+    init_attr.cap.max_recv_wr = MAX_WR;
+    init_attr.cap.max_recv_sge = 1;
+    init_attr.cap.max_send_sge = 1; // 每次只能有一个缓冲区中的数据发送给对方
+    init_attr.qp_type = IBV_QPT_RC; // 可靠连接
+    init_attr.send_cq = cb->cq;     // 发送端完成队列
+    init_attr.recv_cq = cb->cq;     // 接收端完成队列
+
+    // 根据是否是服务端来判断根据cm_id还是child_cm_id来判断
+    if (cb->server) {
+        ret = rdma_create_qp(cb->child_cm_id, cb->pd, &init_attr);
+        if (!ret)
+            cb->qp = cb->child_cm_id->qp;
+    } else {
+        ret = rdma_create_qp(cb->cm_id, cb->pd, &init_attr);
+        if (!ret)
+            cb->qp = cb->cm_id->qp;
+    }
+
     return ret;
 }
 

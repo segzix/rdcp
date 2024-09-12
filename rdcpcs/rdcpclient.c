@@ -6,10 +6,147 @@
 #include <libgen.h>
 #include <unistd.h>
 
+static int rdcp_bind_client(struct rdcp_cb *cb);
+static int rdcp_connect_client(struct rdcp_cb *cb);
+static int rdcp_test_client(struct rdcp_cb *cb);
+
+int rdcp_run_client(struct rdcp_cb *cb) {
+    struct ibv_recv_wr *bad_wr;
+    int i, ret;
+
+    if (!cb->use_null) {
+        int fd = open(cb->metadata.src_path, O_RDONLY);
+
+        close(fd);
+        if (fd < 0) {
+            perror("failed to open source file");
+            return errno;
+        }
+    }
+
+    ret = rdcp_bind_client(cb);
+    if (ret)
+        return ret;
+
+    ret = rdcp_setup_qp(cb, cb->cm_id);
+    if (ret) {
+        fprintf(stderr, "setup_qp failed: %d\n", ret);
+        return ret;
+    }
+
+    ret = rdcp_setup_buffers(cb);
+    if (ret) {
+        fprintf(stderr, "rdcp_setup_buffers failed: %d\n", ret);
+        goto free_qp;
+    }
+
+    /** 接收端的工作全部准备好 */
+    ret = ibv_post_recv(cb->qp, &cb->md_recv_wr, &bad_wr);
+
+    for (i = 0; i < MAX_TASKS; i++) {
+        ret = ibv_post_recv(cb->qp, &cb->recv_tasks[i].rq_wr, &bad_wr);
+        if (ret) {
+            fprintf(stderr, "ibv_post_recv failed: %d\n", ret);
+            goto free_buffers;
+        }
+    }
+
+    pthread_create(&cb->cqthread, NULL, cq_thread, cb);
+
+    ret = rdcp_connect_client(cb);
+    if (ret) {
+        fprintf(stderr, "connect error %d\n", ret);
+        cb->state = ERROR;
+        goto join_cq_thread;
+    }
+
+    ret = rdcp_test_client(cb);
+    if (ret) {
+        fprintf(stderr, "rdcp client failed: %d\n", ret);
+        goto discon;
+    }
+
+    ret = 0;
+discon:
+    if (cb->cm_id)
+        rdma_disconnect(cb->cm_id);
+join_cq_thread:
+    pthread_join(cb->cqthread, NULL);
+    // TODO: wait for flush
+    sleep(1);
+free_buffers:
+    rdcp_free_buffers(cb);
+free_qp:
+    rdcp_free_qp(cb);
+
+    return ret;
+}
+
+/**
+ * rdma绑定客户端
+ */
+int rdcp_bind_client(struct rdcp_cb *cb) {
+    int ret;
+
+    if (cb->sin.ss_family == AF_INET)
+        ((struct sockaddr_in *)&cb->sin)->sin_port = cb->port;
+    else
+        ((struct sockaddr_in6 *)&cb->sin)->sin6_port = cb->port;
+
+    /** 解析地址信息进行绑定 */
+    ret = rdma_resolve_addr(cb->cm_id, NULL, (struct sockaddr *)&cb->sin, 2000);
+    if (ret) {
+        perror("rdma_resolve_addr");
+        return ret;
+    }
+
+    sem_wait(&cb->sem);
+    if (cb->state != ROUTE_RESOLVED) {
+        fprintf(stderr, "waiting for addr/route resolution state %d\n", cb->state);
+        return -1;
+    }
+
+    VERBOSE_LOG(3, "rdma_resolve_addr - rdma_resolve_route successful\n");
+    return 0;
+}
+
+/**
+ * 建立连接
+ * sem_wait(&cb->sem)相当于一个同步操作，用这个同步操作来保证所有必须动作的同步(按顺序进行)
+ * 建立连接->发送文件元数据->发送完一轮的send_tasks(标记client端rdma的区域，方便远程访问)
+ */
+int rdcp_connect_client(struct rdcp_cb *cb) {
+    struct rdma_conn_param conn_param;
+    int ret;
+
+    memset(&conn_param, 0, sizeof conn_param);
+    conn_param.responder_resources = 1;
+    conn_param.initiator_depth = 1;
+    conn_param.retry_count = 7;
+    // if we need retry because we miss recv wr
+    //	conn_param.rnr_retry_count = 6;
+
+    ret = rdma_connect(cb->cm_id, &conn_param);
+    if (ret) {
+        perror("rdma_connect");
+        return ret;
+    }
+
+    sem_wait(&cb->sem);
+    if (cb->state != CONNECTED) {
+        fprintf(stderr, "wait for CONNECTED state %d\n", cb->state);
+        return -1;
+    }
+
+    VERBOSE_LOG(3, "rmda_connect successful\n");
+    return 0;
+}
+
 /**
  * 客户端处理接收请求
  */
 int client_recv(struct rdcp_cb *cb, struct ibv_wc *wc) {
+    // wakeup metadata sem wait
     if (wc->wr_id == METADATA_WR_ID) {
         sem_post(&cb->sem);
         return 0;
@@ -131,64 +268,4 @@ out:
     cb->fd = -1;
 
     return (cb->state == DISCONNECTED) ? 0 : ret;
-}
-
-/**
- * 建立连接
- * sem_wait(&cb->sem)相当于一个同步操作，用这个同步操作来保证所有必须动作的同步(按顺序进行)
- * 建立连接->发送文件元数据->发送完一轮的send_tasks(标记client端rdma的区域，方便远程访问)
- */
-int rdcp_connect_client(struct rdcp_cb *cb) {
-    struct rdma_conn_param conn_param;
-    int ret;
-
-    memset(&conn_param, 0, sizeof conn_param);
-    conn_param.responder_resources = 1;
-    conn_param.initiator_depth = 1;
-    conn_param.retry_count = 7;
-    // if we need retry because we miss recv wr
-    //	conn_param.rnr_retry_count = 6;
-
-    ret = rdma_connect(cb->cm_id, &conn_param);
-    if (ret) {
-        perror("rdma_connect");
-        return ret;
-    }
-
-    sem_wait(&cb->sem);
-    if (cb->state != CONNECTED) {
-        fprintf(stderr, "wait for CONNECTED state %d\n", cb->state);
-        return -1;
-    }
-
-    VERBOSE_LOG(3, "rmda_connect successful\n");
-    return 0;
-}
-
-/**
- * rdma绑定客户端
- */
-int rdcp_bind_client(struct rdcp_cb *cb) {
-    int ret;
-
-    if (cb->sin.ss_family == AF_INET)
-        ((struct sockaddr_in *)&cb->sin)->sin_port = cb->port;
-    else
-        ((struct sockaddr_in6 *)&cb->sin)->sin6_port = cb->port;
-
-    /** 解析地址信息进行绑定 */
-    ret = rdma_resolve_addr(cb->cm_id, NULL, (struct sockaddr *)&cb->sin, 2000);
-    if (ret) {
-        perror("rdma_resolve_addr");
-        return ret;
-    }
-
-    sem_wait(&cb->sem);
-    if (cb->state != ROUTE_RESOLVED) {
-        fprintf(stderr, "waiting for addr/route resolution state %d\n", cb->state);
-        return -1;
-    }
-
-    VERBOSE_LOG(3, "rdma_resolve_addr - rdma_resolve_route successful\n");
-    return 0;
 }

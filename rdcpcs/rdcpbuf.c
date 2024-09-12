@@ -4,48 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static int rdcp_setup_wr(struct rdcp_cb *cb) {
-    int i;
-    char *buf = cb->rdma_buf;
-
-    /** 元数据信息注册 */
-    cb->metadata_mr =
-        ibv_reg_mr(cb->pd, &cb->metadata, sizeof(struct metadata_info), IBV_ACCESS_LOCAL_WRITE);
-    if (!cb->metadata_mr) {
-        fprintf(stderr, "metadata reg_mr failed\n");
-        return errno;
-    }
-
-    /** 元数据的句柄(指向缓冲区) */
-    cb->metadata_sgl.addr = uint64_from_ptr(&cb->metadata);
-    cb->metadata_sgl.length = sizeof(struct metadata_info);
-    cb->metadata_sgl.lkey = cb->metadata_mr->lkey;
-
-    /** 元数据send请求的初始化(指向元数据句柄) */
-    cb->md_send_wr.opcode = IBV_WR_SEND;
-    cb->md_send_wr.send_flags = IBV_SEND_SIGNALED;
-    cb->md_send_wr.sg_list = &cb->metadata_sgl;
-    cb->md_send_wr.num_sge = 1;
-    cb->md_send_wr.wr_id = METADATA_WR_ID;
-
-    /** 元数据recv请求的初始化(指向元数据句柄) */
-    cb->md_recv_wr.sg_list = &cb->metadata_sgl;
-    cb->md_recv_wr.num_sge = 1;
-    cb->md_recv_wr.wr_id = METADATA_WR_ID;
-
-    /** rdma句柄与请求初始化，绑定至rdma_buf */
-    for (i = 0; i < MAX_TASKS; i++) {
-        cb->rdma_sgl[i].addr = uint64_from_ptr(buf);
-        cb->rdma_sgl[i].length = BUF_SIZE;
-        cb->rdma_sgl[i].lkey = cb->rdma_mr->lkey;
-        cb->rdma_sq_wr[i].send_flags = IBV_SEND_SIGNALED;
-        cb->rdma_sq_wr[i].sg_list = &cb->rdma_sgl[i];
-        cb->rdma_sq_wr[i].num_sge = 1;
-        buf += BUF_SIZE;
-    }
-
-    return 0;
-}
+static int rdcp_setup_wr(struct rdcp_cb *cb);
 
 int rdcp_setup_buffers(struct rdcp_cb *cb) {
     int ret;
@@ -204,4 +163,47 @@ void rdcp_free_buffers(struct rdcp_cb *cb) {
     //	if (!cb->server) {
     ibv_dereg_mr(cb->start_mr);
     //	}
+}
+
+int rdcp_setup_wr(struct rdcp_cb *cb) {
+    int i;
+    char *buf = cb->rdma_buf;
+
+    /** 元数据信息注册 */
+    cb->metadata_mr =
+        ibv_reg_mr(cb->pd, &cb->metadata, sizeof(struct metadata_info), IBV_ACCESS_LOCAL_WRITE);
+    if (!cb->metadata_mr) {
+        fprintf(stderr, "metadata reg_mr failed\n");
+        return errno;
+    }
+
+    /** 元数据的句柄(指向缓冲区) */
+    cb->metadata_sgl.addr = uint64_from_ptr(&cb->metadata);
+    cb->metadata_sgl.length = sizeof(struct metadata_info);
+    cb->metadata_sgl.lkey = cb->metadata_mr->lkey;
+
+    /** 元数据send请求的初始化(指向元数据句柄) */
+    cb->md_send_wr.opcode = IBV_WR_SEND;
+    cb->md_send_wr.send_flags = IBV_SEND_SIGNALED;
+    cb->md_send_wr.sg_list = &cb->metadata_sgl;
+    cb->md_send_wr.num_sge = 1;
+    cb->md_send_wr.wr_id = METADATA_WR_ID;
+
+    /** 元数据recv请求的初始化(指向元数据句柄) */
+    cb->md_recv_wr.sg_list = &cb->metadata_sgl;
+    cb->md_recv_wr.num_sge = 1;
+    cb->md_recv_wr.wr_id = METADATA_WR_ID;
+
+    /** rdma句柄与请求初始化，绑定至rdma_buf */
+    for (i = 0; i < MAX_TASKS; i++) {
+        cb->rdma_sgl[i].addr = uint64_from_ptr(buf);
+        cb->rdma_sgl[i].length = BUF_SIZE;
+        cb->rdma_sgl[i].lkey = cb->rdma_mr->lkey;
+        cb->rdma_sq_wr[i].send_flags = IBV_SEND_SIGNALED;
+        cb->rdma_sq_wr[i].sg_list = &cb->rdma_sgl[i];
+        cb->rdma_sq_wr[i].num_sge = 1;
+        buf += BUF_SIZE;
+    }
+
+    return 0;
 }

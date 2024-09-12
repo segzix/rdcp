@@ -5,27 +5,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-/**
- * 轮询完成事件队列并调用handle_wc进行处理
- */
-static int rdcp_cq_event_handler(struct rdcp_cb *cb) {
-    struct ibv_wc wcs[MAX_WC];
-    int i, n;
-
-    VERBOSE_LOG(3, "poll\n");
-    while ((n = ibv_poll_cq(cb->cq, MAX_WC, wcs)) > 0) {
-        for (i = 0; i < n; i++) {
-            handle_wc(cb, &wcs[i]);
-        }
-    }
-
-    if (n < 0)
-        return n;
-
-    return 0;
-}
+static int rdcp_cq_event_handler(struct rdcp_cb *cb);
+static int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc);
+static int rearm_completions(struct rdcp_cb *cb);
 
 /**
+ * 核心线程(用来掌管rdma的接收与发送)
  * 用户端与服务端负责轮询并处理完成队列相关事件的线程
  */
 void *cq_thread(void *arg) {
@@ -54,17 +39,20 @@ void *cq_thread(void *arg) {
             fprintf(stderr, "Failed to get cq event!\n");
             pthread_exit(NULL);
         }
+        VERBOSE_LOG(3, "get cq event\n");
 
         tick2 = current_timestamp();
         if (tick2 - tick1 > 1000) {
             VERBOSE_LOG(1, "got pause %f\n", (tick2 - tick1) / 1000.0);
         }
+        VERBOSE_LOG(3, "skip pause\n");
 
         //完成队列应该和cb结构体中规定的一致，否则报错
         if (ev_cq != cb->cq) {
             fprintf(stderr, "Unknown CQ!\n");
             pthread_exit(NULL);
         }
+        VERBOSE_LOG(3, "consistent\n");
 
         //确认一个完成事件
         ibv_ack_cq_events(cb->cq, 1);
@@ -91,31 +79,23 @@ void *cq_thread(void *arg) {
 }
 
 /**
- * 在所有的recv tasks处理完后，将所有的tasks做成一个链表，并将第一个task的任务发送出去
+ * 轮询完成事件队列并调用handle_wc进行处理
  */
-static int rearm_completions(struct rdcp_cb *cb) {
-    int i, ret;
-    static int rearm = 0;
+int rdcp_cq_event_handler(struct rdcp_cb *cb) {
+    struct ibv_wc wcs[MAX_WC];
+    int i, n;
 
-    rearm++;
-    if (rearm == MAX_TASKS) {
-        struct ibv_recv_wr *wr = &cb->recv_tasks[0].rq_wr;
-        for (i = 1; i < MAX_TASKS; i++) {
-            wr->next = &cb->recv_tasks[i].rq_wr;
-            wr = &cb->recv_tasks[i].rq_wr;
+    VERBOSE_LOG(3, "poll\n");
+    while ((n = ibv_poll_cq(cb->cq, MAX_WC, wcs)) > 0) {
+        for (i = 0; i < n; i++) {
+            handle_wc(cb, &wcs[i]);
         }
-        ret = ibv_post_recv(cb->qp, &cb->recv_tasks[0].rq_wr, NULL);
-        if (ret) {
-            perror("post recv error");
-            goto error;
-        }
-        rearm = 0;
     }
 
-    return 0;
+    if (n < 0)
+        return n;
 
-error:
-    return ret;
+    return 0;
 }
 
 /**
@@ -184,6 +164,7 @@ int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
 
         cb->recv_count++;
         if (cb->recv_count >= cb->sent_count)
+            // wakeup recv <= MAXTASKS sem wait
             sem_post(&cb->sem);
         break;
 
@@ -209,5 +190,33 @@ error:
         //			rdma_disconnect(cb->cm_id);
     }
     sem_post(&cb->sem);
+    return ret;
+}
+
+/**
+ * 在所有的recv tasks处理完后，将所有的tasks做成一个链表，并将第一个task的任务发送出去
+ */
+int rearm_completions(struct rdcp_cb *cb) {
+    int i, ret;
+    static int rearm = 0;
+
+    rearm++;
+    if (rearm == MAX_TASKS) {
+        struct ibv_recv_wr *wr = &cb->recv_tasks[0].rq_wr;
+        for (i = 1; i < MAX_TASKS; i++) {
+            wr->next = &cb->recv_tasks[i].rq_wr;
+            wr = &cb->recv_tasks[i].rq_wr;
+        }
+        ret = ibv_post_recv(cb->qp, &cb->recv_tasks[0].rq_wr, NULL);
+        if (ret) {
+            perror("post recv error");
+            goto error;
+        }
+        rearm = 0;
+    }
+
+    return 0;
+
+error:
     return ret;
 }

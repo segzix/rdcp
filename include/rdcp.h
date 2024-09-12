@@ -126,26 +126,24 @@ struct rdcp_cb {
 extern int verbose;
 
 /** server */
-int rdcp_bind_server(struct rdcp_cb *cb);
+int rdcp_run_server(struct rdcp_cb *cb);
 int server_response(struct rdcp_cb *cb, struct ibv_wc *wc);
-int server_open_dest(struct rdcp_cb *cb);
-int server_recv_metadata(struct rdcp_cb *cb, struct ibv_wc *wc);
 int server_recv(struct rdcp_cb *cb, struct ibv_wc *wc);
-int rdcp_test_server(struct rdcp_cb *cb);
-int rdcp_bind_server(struct rdcp_cb *cb);
-int rdcp_accept(struct rdcp_cb *cb);
 
 /** client */
+int rdcp_run_client(struct rdcp_cb *cb);
 int client_recv(struct rdcp_cb *cb, struct ibv_wc *wc);
-int rdcp_test_client(struct rdcp_cb *cb);
-int rdcp_connect_client(struct rdcp_cb *cb);
-int rdcp_bind_client(struct rdcp_cb *cb);
 
+/** rdcp core */
 void *cq_thread(void *arg);
+
+/** rdcp buffers */
 int rdcp_setup_buffers(struct rdcp_cb *cb);
+void rdcp_free_buffers(struct rdcp_cb *cb);
+
+/** rdcp queues */
 int rdcp_create_qp(struct rdcp_cb *cb);
 int rdcp_setup_qp(struct rdcp_cb *cb, struct rdma_cm_id *cm_id);
-void rdcp_free_buffers(struct rdcp_cb *cb);
-int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc);
 void rdcp_free_qp(struct rdcp_cb *cb);
+
 #endif

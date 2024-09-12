@@ -134,6 +134,8 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sgl.addr = uint64_from_ptr(&send_task->buf);
             send_task->sgl.length = sizeof(struct rdma_info);
             send_task->sgl.lkey = send_task->mr->lkey;
+            
+            fprintf(stderr, "send task sgl\n");
             /**
              * 初始化一个接收请求
              * 1.指向请求缓冲区的第一个句柄结构体
@@ -145,6 +147,8 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sq_wr.sg_list = &send_task->sgl;
             send_task->sq_wr.num_sge = 1;
             send_task->sq_wr.wr_id = 200 + i;
+            
+            fprintf(stderr, "send task wr\n");
         }
     }
 

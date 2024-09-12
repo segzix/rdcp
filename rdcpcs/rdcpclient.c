@@ -253,6 +253,7 @@ int rdcp_test_client(struct rdcp_cb *cb) {
 
         /** Wait for server to ACK */
         VERBOSE_LOG(1, "wait for server respond\n");
+        VERBOSE_LOG(1, "recv_count: %d cb->sem: %ld\n", cb->recv_count, cb->sem);
         while (cb->recv_count < i) {
             sem_wait(&cb->sem);
         }

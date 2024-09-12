@@ -102,6 +102,8 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         /** 客户端初始化send_tasks(将类型也设置好为IBV_WR_SEND) */
         for (i = 0; i < MAX_TASKS; i++) {
             struct rdcp_task *send_task = &cb->send_tasks[i];
+            VERBOSE_LOG(1, "task_list: %lx task_free: %lx\n", &send_task->task_list,
+                        &cb->task_free);
             list_add_tail(&send_task->task_list, &cb->task_free);
 
             /** send_task的buf来自start_buf的切分 */
@@ -129,6 +131,8 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             VERBOSE_LOG(1, "enter for\n");
 
             struct rdcp_task *send_task = &cb->send_tasks[i];
+            VERBOSE_LOG(1, "task_list: %lx task_free: %lx\n", &send_task->task_list,
+                        &cb->task_free);
             list_add_tail(&send_task->task_list, &cb->task_free);
 
             VERBOSE_LOG(1, "finish list\n");
@@ -140,7 +144,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sgl.addr = uint64_from_ptr(&send_task->buf);
             send_task->sgl.length = sizeof(struct rdma_info);
             send_task->sgl.lkey = send_task->mr->lkey;
-            
+
             VERBOSE_LOG(1, "send task sgl\n");
             /**
              * 初始化一个接收请求
@@ -153,7 +157,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             send_task->sq_wr.sg_list = &send_task->sgl;
             send_task->sq_wr.num_sge = 1;
             send_task->sq_wr.wr_id = 200 + i;
-            
+
             VERBOSE_LOG(1, "send task sgl\n");
         }
     }

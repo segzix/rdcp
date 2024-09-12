@@ -163,6 +163,7 @@ int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
         rearm_completions(cb);
 
         cb->recv_count++;
+        VERBOSE_LOG(3, "recv_count: %d\n", cb->recv_count);
         if (cb->recv_count >= cb->sent_count)
             // wakeup recv <= MAXTASKS sem wait
             sem_post(&cb->sem);

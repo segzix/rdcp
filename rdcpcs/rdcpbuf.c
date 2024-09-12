@@ -126,6 +126,8 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         }
     } else {
         VERBOSE_LOG(1, "enter server\n");
+        INIT_LIST_HEAD(&cb->task_free);
+        INIT_LIST_HEAD(&cb->task_alloc);
         /** 客户端初始化send_tasks(将类型也设置好为IBV_WR_SEND) */
         for (i = 0; i < MAX_TASKS; i++) {
             VERBOSE_LOG(1, "enter for\n");

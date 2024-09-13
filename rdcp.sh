@@ -1,8 +1,9 @@
 #!/bin/bash
-limit=300000
+set -x
+limit=300
 
 i=0
-plim=5000
+plim=50
 while [ $i -lt $limit ]
 do
     ((i++))
@@ -10,6 +11,6 @@ do
     then
         cat rdcp.c >> rdcptest
         echo -e "plim: $plim\n"
-        ((plim+=5000))
+        ((plim+=50))
     fi
 done

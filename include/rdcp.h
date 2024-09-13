@@ -54,7 +54,7 @@ extern FILE* logfile;
 #define ptr_from_int64(p) (void *)(unsigned long)(p)
 
 struct rdcp_task {
-    struct rdma_info buf;
+    struct rdma_info rdmaInfo;
     struct ibv_sge sgl;
     struct ibv_mr *mr;
     union {

@@ -21,10 +21,10 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         struct rdcp_task *recv_task = &cb->recv_tasks[i];
         struct rdcp_task *send_task = &cb->send_tasks[i];
 
-        recv_task->buf.id = i;
+        recv_task->rdmaInfo.id = i;
         //注册recv_task缓冲区的内存
-        recv_task->mr =
-            ibv_reg_mr(cb->pd, &recv_task->buf, sizeof(struct rdma_info), IBV_ACCESS_LOCAL_WRITE);
+        recv_task->mr = ibv_reg_mr(cb->pd, &recv_task->rdmaInfo, sizeof(struct rdma_info),
+                                   IBV_ACCESS_LOCAL_WRITE);
         if (!recv_task->mr) {
             fprintf(stderr, "recv_buf reg_mr failed\n");
             ret = errno;
@@ -34,7 +34,7 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
          * 初始化接收缓冲区的句柄(指向缓冲区)
          * 1.地址 2.长度 3.描述内存区域的标志key
          */
-        recv_task->sgl.addr = uint64_from_ptr(&recv_task->buf);
+        recv_task->sgl.addr = uint64_from_ptr(&recv_task->rdmaInfo);
         recv_task->sgl.length = sizeof(struct rdma_info);
         recv_task->sgl.lkey = recv_task->mr->lkey;
         /**
@@ -53,31 +53,14 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             wr->next = &(recv_task->rq_wr);
         }
 
-        send_task->buf.id = i;
+        send_task->rdmaInfo.id = i;
         //注册send_task缓冲区的内存
-        send_task->mr = ibv_reg_mr(cb->pd, &send_task->buf, sizeof(struct rdma_info), 0);
+        send_task->mr = ibv_reg_mr(cb->pd, &send_task->rdmaInfo, sizeof(struct rdma_info), 0);
         if (!send_task->mr) {
             fprintf(stderr, "send_buf reg_mr failed\n");
             ret = errno;
             goto error;
         }
-    }
-
-    // valloc申请内存，刷0，rdma注册内存区域进行保护
-    cb->rdma_buf = valloc(BUF_SIZE * MAX_TASKS);
-    if (!cb->rdma_buf) {
-        fprintf(stderr, "rdma_buf alloc failed\n");
-        ret = -ENOMEM;
-        goto error;
-    }
-    memset(cb->rdma_buf, 0, BUF_SIZE * MAX_TASKS);
-    cb->rdma_mr =
-        ibv_reg_mr(cb->pd, cb->rdma_buf, BUF_SIZE * MAX_TASKS,
-                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
-    if (!cb->rdma_mr) {
-        fprintf(stderr, "rdma_buf reg_mr failed\n");
-        ret = errno;
-        goto error;
     }
 
     /** 初始化队列 */
@@ -96,7 +79,6 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         }
         start_buf = cb->start_buf;
         memset(cb->start_buf, 0, BUF_SIZE * MAX_TASKS);
-        // printf("cb->pd->handle: %u\ncb->start_buf: %x\n", cb->pd->handle, cb->start_buf);
         cb->start_mr =
             ibv_reg_mr(cb->pd, cb->start_buf, BUF_SIZE * MAX_TASKS,
                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
@@ -112,12 +94,12 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             list_add_tail(&send_task->task_list, &cb->task_free);
 
             /** send_task的buf来自start_buf的切分 */
-            send_task->buf.buf = uint64_from_ptr(start_buf);
-            send_task->buf.size = BUF_SIZE;
-            send_task->buf.rkey = cb->start_mr->rkey;
+            send_task->rdmaInfo.buf = uint64_from_ptr(start_buf);
+            send_task->rdmaInfo.size = BUF_SIZE;
+            send_task->rdmaInfo.rkey = cb->start_mr->rkey;
 
             /** 初始化send_task的句柄与请求(可能包含多个句柄)，绑定至send_task的buf，实际上就是绑定至start_buf的某块区域 */
-            send_task->sgl.addr = uint64_from_ptr(&send_task->buf);
+            send_task->sgl.addr = uint64_from_ptr(&send_task->rdmaInfo);
             send_task->sgl.length = sizeof(struct rdma_info);
             send_task->sgl.lkey = send_task->mr->lkey;
 
@@ -130,17 +112,35 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
             start_buf += BUF_SIZE;
         }
     } else {
+        // valloc申请内存，刷0，rdma注册内存区域进行保护
+        cb->rdma_buf = valloc(BUF_SIZE * MAX_TASKS);
+        if (!cb->rdma_buf) {
+            fprintf(stderr, "rdma_buf alloc failed\n");
+            ret = -ENOMEM;
+            goto error;
+        }
+        memset(cb->rdma_buf, 0, BUF_SIZE * MAX_TASKS);
+        cb->rdma_mr =
+            ibv_reg_mr(cb->pd, cb->rdma_buf, BUF_SIZE * MAX_TASKS,
+                       IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE);
+        if (!cb->rdma_mr) {
+            fprintf(stderr, "rdma_buf reg_mr failed\n");
+            ret = errno;
+            goto error;
+        }
+
         /** 服务端初始化send_tasks(将类型也设置好为IBV_WR_SEND) */
         for (i = 0; i < MAX_TASKS; i++) {
-
             struct rdcp_task *send_task = &cb->send_tasks[i];
             list_add_tail(&send_task->task_list, &cb->task_free);
+
+            /** !server端的rdmaInfo没有必要进行指定，因为没有要承载的信息 */
 
             /**
              * 初始化接收缓冲区的句柄(指向缓冲区)
              * 1.地址 2.长度 3.描述内存区域的标志key
              */
-            send_task->sgl.addr = uint64_from_ptr(&send_task->buf);
+            send_task->sgl.addr = uint64_from_ptr(&send_task->rdmaInfo);
             send_task->sgl.length = sizeof(struct rdma_info);
             send_task->sgl.lkey = send_task->mr->lkey;
 
@@ -195,9 +195,8 @@ void rdcp_free_buffers(struct rdcp_cb *cb) {
     }
     if (cb->metadata_mr)
         ibv_dereg_mr(cb->metadata_mr);
-    //	if (!cb->server) {
-    ibv_dereg_mr(cb->start_mr);
-    //	}
+    if (!cb->server)
+        ibv_dereg_mr(cb->start_mr);
 }
 
 int rdcp_setup_wr(struct rdcp_cb *cb) {
@@ -230,14 +229,17 @@ int rdcp_setup_wr(struct rdcp_cb *cb) {
     cb->md_recv_wr.wr_id = METADATA_WR_ID;
 
     /** rdma句柄与请求初始化，绑定至rdma_buf */
-    for (i = 0; i < MAX_TASKS; i++) {
-        cb->rdma_sgl[i].addr = uint64_from_ptr(buf);
-        cb->rdma_sgl[i].length = BUF_SIZE;
-        cb->rdma_sgl[i].lkey = cb->rdma_mr->lkey;
-        cb->rdma_sq_wr[i].send_flags = IBV_SEND_SIGNALED;
-        cb->rdma_sq_wr[i].sg_list = &cb->rdma_sgl[i];
-        cb->rdma_sq_wr[i].num_sge = 1;
-        buf += BUF_SIZE;
+    /** 这里server端只对rdma本地的相关信息进行了初始化，远程的remote_addr等信息还需要对方进行传送 */
+    if (cb->server) {
+        for (i = 0; i < MAX_TASKS; i++) {
+            cb->rdma_sgl[i].addr = uint64_from_ptr(buf);
+            cb->rdma_sgl[i].length = BUF_SIZE;
+            cb->rdma_sgl[i].lkey = cb->rdma_mr->lkey;
+            cb->rdma_sq_wr[i].send_flags = IBV_SEND_SIGNALED;
+            cb->rdma_sq_wr[i].sg_list = &cb->rdma_sgl[i];
+            cb->rdma_sq_wr[i].num_sge = 1;
+            buf += BUF_SIZE;
+        }
     }
 
     return 0;

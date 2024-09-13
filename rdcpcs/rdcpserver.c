@@ -13,7 +13,7 @@ static int rdcp_test_server(struct rdcp_cb *cb);
 
 int rdcp_run_server(struct rdcp_cb *cb) {
     struct ibv_recv_wr *bad_wr;
-    int i, ret;
+    int ret;
 
     ret = rdcp_bind_server(cb);
     if (ret)
@@ -150,7 +150,7 @@ int server_response(struct rdcp_cb *cb, struct ibv_wc *wc) {
     struct rdcp_task *send_task = &cb->send_tasks[id];
     struct rdcp_task *recv_task = &cb->recv_tasks[id];
 
-    send_task->buf.size = recv_task->buf.size;
+    send_task->rdmaInfo.size = recv_task->rdmaInfo.size;
     ret = ibv_post_send(cb->qp, &send_task->sq_wr, &bad_wr);
     if (ret) {
         perror("server response error");
@@ -185,11 +185,11 @@ int server_recv(struct rdcp_cb *cb, struct ibv_wc *wc) {
     }
 
     /** 远程文件的key addr等信息*/
-    cb->remote_rkey = task->buf.rkey;
-    cb->remote_addr = task->buf.buf;
-    cb->remote_len = task->buf.size;
+    cb->remote_rkey = task->rdmaInfo.rkey;
+    cb->remote_addr = task->rdmaInfo.buf;
+    cb->remote_len = task->rdmaInfo.size;
     VERBOSE_LOG(1, "Received rkey %x addr %" PRIx64 " len %d from peer\n", cb->remote_rkey,
-                task->buf.buf, cb->remote_len);
+                task->rdmaInfo.buf, cb->remote_len);
     VERBOSE_LOG(1, "rdma read %d %p\n", i, &cb->rdma_buf[i * BUF_SIZE]);
 
     /** Issue RDMA Read. */

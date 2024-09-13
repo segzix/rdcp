@@ -141,8 +141,8 @@ int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
         VERBOSE_LOG(1, "fd %d i %d rdma_buf %p\n", cb->fd, i, &cb->rdma_buf[i * BUF_SIZE]);
         if (!cb->use_null) {
             VERBOSE_LOG(3, "cb->fd: %d cb->rdma_buf: %s size: %d\n", cb->fd,
-                        &cb->rdma_buf[i * BUF_SIZE], cb->recv_tasks[i].buf.size);
-            size = write(cb->fd, &cb->rdma_buf[i * BUF_SIZE], cb->recv_tasks[i].buf.size);
+                        &cb->rdma_buf[i * BUF_SIZE], cb->recv_tasks[i].rdmaInfo.size);
+            size = write(cb->fd, &cb->rdma_buf[i * BUF_SIZE], cb->recv_tasks[i].rdmaInfo.size);
 
             if (size < 0) {
                 printf("error writing data\n");
@@ -205,17 +205,11 @@ error:
  * 在所有的recv tasks处理完后，重置所有recv_tasks
  */
 int rearm_completions(struct rdcp_cb *cb) {
-    int i, ret;
+    int ret;
     static int rearm = 0;
 
     rearm++;
     if (rearm == MAX_TASKS) {
-        // struct ibv_recv_wr *wr = &cb->recv_tasks[0].rq_wr;
-        // /** 串联所有接收请求，以便一次提交 12*/
-        // for (i = 1; i < MAX_TASKS; i++) {
-        //     wr->next = &cb->recv_tasks[i].rq_wr;
-        //     wr = &cb->recv_tasks[i].rq_wr;
-        // }
         ret = ibv_post_recv(cb->qp, &cb->recv_tasks[0].rq_wr, NULL);
         if (ret) {
             perror("post recv error");

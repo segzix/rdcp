@@ -46,6 +46,12 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
         recv_task->rq_wr.num_sge = 1;
         recv_task->rq_wr.wr_id = i;
 
+        /** 串联接收请求，以便一次提交 */
+        if (i != 0) {
+            struct ibv_recv_wr *wr = &cb->recv_tasks[i - 1].rq_wr;
+            wr->next = &cb->recv_tasks[i].rq_wr;
+        }
+
         send_task->buf.id = i;
         //注册send_task缓冲区的内存
         send_task->mr = ibv_reg_mr(cb->pd, &send_task->buf, sizeof(struct rdma_info), 0);

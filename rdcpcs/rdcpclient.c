@@ -42,15 +42,11 @@ int rdcp_run_client(struct rdcp_cb *cb) {
 
     /** 接收端的工作全部准备好 */
     ret = ibv_post_recv(cb->qp, &cb->md_recv_wr, &bad_wr);
-
-    for (i = 0; i < MAX_TASKS; i++) {
-        ret = ibv_post_recv(cb->qp, &cb->recv_tasks[i].rq_wr, &bad_wr);
-        if (ret) {
-            fprintf(stderr, "ibv_post_recv failed: %d\n", ret);
-            goto free_buffers;
-        }
+    ret = ibv_post_recv(cb->qp, &cb->recv_tasks[0].rq_wr, &bad_wr);
+    if (ret) {
+        fprintf(stderr, "ibv_post_recv failed: %d\n", ret);
+        goto free_buffers;
     }
-    
 
     pthread_create(&cb->cqthread, NULL, cq_thread, cb);
 

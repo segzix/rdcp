@@ -50,6 +50,7 @@ int rdcp_run_client(struct rdcp_cb *cb) {
             goto free_buffers;
         }
     }
+    
 
     pthread_create(&cb->cqthread, NULL, cq_thread, cb);
 

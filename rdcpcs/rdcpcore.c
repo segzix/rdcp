@@ -122,6 +122,7 @@ int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
     switch (wc->opcode) {
     case IBV_WC_SEND:
         VERBOSE_LOG(3, "send completion\n");
+        cb->sent_count++;
         break;
 
     case IBV_WC_RDMA_WRITE:

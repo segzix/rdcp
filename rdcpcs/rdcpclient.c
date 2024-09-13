@@ -247,7 +247,6 @@ int rdcp_test_client(struct rdcp_cb *cb) {
                 break;
             }
 
-            cb->sent_count++;
             total_size += size;
         }
 

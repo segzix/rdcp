@@ -106,7 +106,7 @@ int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
     int i;
     int size;
 
-    VERBOSE_LOG(3, "wc->wr_id: %lu\n", wc->wr_id);
+    VERBOSE_LOG(3, "\nwc->wr_id: %lu\n", wc->wr_id);
     VERBOSE_LOG(3, "wc->status: %u\n", wc->status);
     VERBOSE_LOG(3, "cb->recv_count: %u\n", cb->recv_count);
     VERBOSE_LOG(3, "cb->sent_count: %u\n", cb->sent_count);

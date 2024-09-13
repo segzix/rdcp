@@ -201,6 +201,8 @@ int server_recv(struct rdcp_cb *cb, struct ibv_wc *wc) {
     cb->rdma_sq_wr[i].wr.rdma.remote_addr = cb->remote_addr;
     cb->rdma_sq_wr[i].sg_list->length = cb->remote_len;
     cb->rdma_sq_wr[i].wr_id = i;
+
+    VERBOSE_LOG(3, "recv wr_id: %d\n", i);
     ret = ibv_post_send(cb->qp, &cb->rdma_sq_wr[i], &bad_wr);
     if (ret) {
         perror("post rdma read failed");

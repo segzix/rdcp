@@ -10,6 +10,7 @@ static int rdcp_setup_wr(struct rdcp_cb *cb);
 int rdcp_setup_buffers(struct rdcp_cb *cb) {
     int ret;
     int i;
+    struct ibv_recv_wr *wr;
 
     VERBOSE_LOG(3, "rdcp_setup_buffers called on cb %p\n", cb);
 
@@ -48,8 +49,8 @@ int rdcp_setup_buffers(struct rdcp_cb *cb) {
 
         /** 串联接收请求，以便一次提交 */
         if (i != 0) {
-            struct ibv_recv_wr *wr = &cb->recv_tasks[i - 1].rq_wr;
-            wr->next = &cb->recv_tasks[i].rq_wr;
+            wr = &(cb->recv_tasks[i - 1].rq_wr);
+            wr->next = &(recv_task->rq_wr);
         }
 
         send_task->buf.id = i;

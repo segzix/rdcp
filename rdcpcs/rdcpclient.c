@@ -219,7 +219,7 @@ int rdcp_test_client(struct rdcp_cb *cb) {
         VERBOSE_LOG(1, "send tasks\n");
         for (i = 0; i < MAX_TASKS; i++) {
             struct rdcp_task *send_task = &cb->send_tasks[i];
-            struct rdma_info *info = &send_task->buf;
+            struct rdma_info *info = &send_task->rdmaInfo;
 
             /**
              * 读取剩余的文件大小

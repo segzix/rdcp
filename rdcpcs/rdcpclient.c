@@ -172,6 +172,7 @@ int rdcp_test_client(struct rdcp_cb *cb) {
     long total_size = 0;
 
     if (!cb->use_null) {
+        VERBOSE_LOG(3, "src_path: %s\n", cb->metadata.src_path)
         cb->fd = open(cb->metadata.src_path, O_RDONLY);
         VERBOSE_LOG(1, "open fd %d\n", cb->fd);
         if (cb->fd < 0) {

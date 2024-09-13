@@ -31,7 +31,7 @@ void *cq_thread(void *arg) {
         pthread_testcancel();
 
         tick1 = current_timestamp();
-        VERBOSE_LOG(3, "wait for cq event\n");
+        VERBOSE_LOG(3, "\nwait for cq event\n");
 
         //通过完成通道cb->channel获取完成队列里的完成事件(队列存储在ev_cq中，事件上下文信息存储在ev_ctx中)
         ret = ibv_get_cq_event(cb->channel, &ev_cq, &ev_ctx);
@@ -106,7 +106,7 @@ int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
     int i;
     int size;
 
-    VERBOSE_LOG(3, "\nwc->wr_id: %lu\n", wc->wr_id);
+    VERBOSE_LOG(3, "wc->wr_id: %lu\n", wc->wr_id);
     VERBOSE_LOG(3, "wc->status: %u\n", wc->status);
     VERBOSE_LOG(3, "cb->recv_count: %u\n", cb->recv_count);
     VERBOSE_LOG(3, "cb->sent_count: %u\n", cb->sent_count);
@@ -140,6 +140,8 @@ int handle_wc(struct rdcp_cb *cb, struct ibv_wc *wc) {
 
         VERBOSE_LOG(1, "fd %d i %d rdma_buf %p\n", cb->fd, i, &cb->rdma_buf[i * BUF_SIZE]);
         if (!cb->use_null) {
+            VERBOSE_LOG(3, "cb->fd: %d cb->rdma_buf: %s size: %d\n", cb->fd,
+                        &cb->rdma_buf[i * BUF_SIZE], cb->recv_tasks[i].buf.size);
             size = write(cb->fd, &cb->rdma_buf[i * BUF_SIZE], cb->recv_tasks[i].buf.size);
 
             if (size < 0) {

@@ -267,6 +267,7 @@ int server_open_dest(struct rdcp_cb *cb) {
     printf("Content of metadata src: %s dst: %s\n", cb->metadata.src_path, cb->metadata.dst_path);
     fflush(stdout);
 
+    VERBOSE_LOG(3, "dst_path: %s\n", cb->metadata.dst_path);
     cb->fd = open(cb->metadata.dst_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (cb->fd < 0) {
         perror("failed to open file");

@@ -47,12 +47,10 @@ int rdcp_run_server(struct rdcp_cb *cb) {
     }
 
     /** 将recv tasks绑定到提交接收工作请求的队列对(准备工作做好) */
-    for (i = 0; i < MAX_TASKS; i++) {
-        ret = ibv_post_recv(cb->qp, &cb->recv_tasks[i].rq_wr, &bad_wr);
-        if (ret) {
-            fprintf(stderr, "error post recv task %d: %m\n", i);
-            goto free_buffers;
-        }
+    ret = ibv_post_recv(cb->qp, &cb->recv_tasks[0].rq_wr, &bad_wr);
+    if (ret) {
+        fprintf(stderr, "ibv_post_recv tasks failed: %d\n", ret);
+        goto free_buffers;
     }
 
     /** 创建一个线程 */

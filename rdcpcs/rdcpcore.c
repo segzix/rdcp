@@ -210,12 +210,12 @@ int rearm_completions(struct rdcp_cb *cb) {
 
     rearm++;
     if (rearm == MAX_TASKS) {
-        struct ibv_recv_wr *wr = &cb->recv_tasks[0].rq_wr;
-        /** 串联所有接收请求，以便一次提交 12*/
-        for (i = 1; i < MAX_TASKS; i++) {
-            wr->next = &cb->recv_tasks[i].rq_wr;
-            wr = &cb->recv_tasks[i].rq_wr;
-        }
+        // struct ibv_recv_wr *wr = &cb->recv_tasks[0].rq_wr;
+        // /** 串联所有接收请求，以便一次提交 12*/
+        // for (i = 1; i < MAX_TASKS; i++) {
+        //     wr->next = &cb->recv_tasks[i].rq_wr;
+        //     wr = &cb->recv_tasks[i].rq_wr;
+        // }
         ret = ibv_post_recv(cb->qp, &cb->recv_tasks[0].rq_wr, NULL);
         if (ret) {
             perror("post recv error");

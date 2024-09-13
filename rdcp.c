@@ -53,7 +53,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-int verbose = 3;
+int verbose = 1;
 FILE* logfile;
 
 static void *cm_thread(void *arg);

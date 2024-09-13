@@ -12,7 +12,7 @@ static int rdcp_test_client(struct rdcp_cb *cb);
 
 int rdcp_run_client(struct rdcp_cb *cb) {
     struct ibv_recv_wr *bad_wr;
-    int i, ret;
+    int ret;
 
     if (!cb->use_null) {
         int fd = open(cb->metadata.src_path, O_RDONLY);

@@ -44,6 +44,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -53,6 +54,7 @@
 #include <unistd.h>
 
 int verbose = 3;
+FILE* logfile;
 
 static void *cm_thread(void *arg);
 static int rdcp_cma_event_handler(struct rdma_cm_id *cma_id, struct rdma_cm_event *event);
@@ -65,6 +67,7 @@ int main(int argc, char *argv[]) {
     cb = malloc(sizeof(*cb));
     if (!cb)
         return -ENOMEM;
+    logfile = fopen("./rdcplog", "w");
 
     memset(cb, 0, sizeof(*cb));
     cb->fd = -1;
@@ -161,6 +164,7 @@ int main(int argc, char *argv[]) {
 
 out:
     free(cb);
+    fclose(logfile);
     return ret;
 }
 

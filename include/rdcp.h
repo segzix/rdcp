@@ -38,6 +38,7 @@ struct metadata_info {
     char dst_path[PATH_MAX];
 };
 
+extern FILE* logfile;
 #define RDCP_PORT 7171
 #define MAX_TASKS 112
 #define MAX_WC 16
@@ -47,7 +48,7 @@ struct metadata_info {
 #define CQ_DEPTH ((MAX_TASKS + 1) * 2)
 #define VERBOSE_LOG(level, fmt, ...)                                                               \
     if (verbose >= level) {                                                                        \
-        printf(fmt, ##__VA_ARGS__);                                                                \
+        fprintf(logfile, fmt, ##__VA_ARGS__);                                                                \
     }
 #define uint64_from_ptr(p) (uint64_t)(uintptr_t)(p)
 #define ptr_from_int64(p) (void *)(unsigned long)(p)
